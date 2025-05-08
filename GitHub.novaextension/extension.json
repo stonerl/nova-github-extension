@@ -1,0 +1,142 @@
+{
+  "identifier": "stonerl.GitHub",
+  "name": "GitHub",
+  "organization": "Toni Förster",
+  "description": "A simple sidebar to list open GitHub issues.",
+  "version": "1.0",
+  "categories": ["sidebars"],
+
+  "main": "main.js",
+  "activationEvents": ["onView:github-issues"],
+
+  "config": [
+    {
+      "key": "token",
+      "type": "string",
+      "title": "GitHub Personal Access Token",
+      "description": "Must have `repo` (or `public_repo`) scope",
+      "default": ""
+    },
+    {
+      "key": "owner",
+      "type": "string",
+      "title": "Repository Owner",
+      "description": "GitHub username or organization",
+      "default": ""
+    },
+    {
+      "key": "repo",
+      "type": "string",
+      "title": "Repository Name",
+      "description": "Name of the GitHub repository",
+      "default": ""
+    }
+  ],
+
+  "entitlements": {
+    "filesystem": "readwrite",
+    "requests": true
+  },
+
+  "commands": {
+    "identifier": "github-issues.openInBrowser",
+    "name": "Open on GitHub",
+    "action": "openInBrowser"
+  },
+
+  "sidebars": [
+    {
+      "id": "github-issues",
+      "smallImage": "sidebar-small",
+      "largeImage": "sidebar-large",
+      "name": "GitHub",
+
+      "sections": [
+        {
+          "id": "issues",
+          "name": "Open Issues",
+          "allowMultiple": false,
+          "placeholderImage": "sidebar-large",
+          "placeholderText": "No open issues.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "tooltip": "Reload open issues",
+              "command": "github-issues.refresh"
+            }
+          ],
+          "contextCommands": [
+            {
+              "title": "Open on GitHub",
+              "command": "github-issues.openInBrowser"
+            }
+          ]
+        },
+        {
+          "id": "closed-issues",
+          "name": "Closed Issues",
+          "allowMultiple": false,
+          "placeholderImage": "sidebar-large",
+          "placeholderText": "No closed issues.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "tooltip": "Reload closed issues",
+              "command": "github-issues.refresh"
+            }
+          ],
+          "contextCommands": [
+            {
+              "title": "Open on GitHub",
+              "command": "github-issues.openInBrowser"
+            }
+          ]
+        },
+        {
+          "id": "pulls",
+          "name": "Open Pull Requests",
+          "allowMultiple": false,
+          "placeholderImage": "sidebar-large",
+          "placeholderText": "No open pull requests.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "tooltip": "Reload open pull requests",
+              "command": "github-issues.refresh"
+            }
+          ],
+          "contextCommands": [
+            {
+              "title": "Open on GitHub",
+              "command": "github-issues.openInBrowser"
+            }
+          ]
+        },
+        {
+          "id": "closed-pulls",
+          "name": "Closed Pull Requests",
+          "allowMultiple": false,
+          "placeholderImage": "sidebar-large",
+          "placeholderText": "No closed pull requests.",
+          "headerCommands": [
+            {
+              "title": "Refresh",
+              "image": "__builtin.refresh",
+              "tooltip": "Reload closed pull requests",
+              "command": "github-issues.refresh"
+            }
+          ],
+          "contextCommands": [
+            {
+              "title": "Open on GitHub",
+              "command": "github-issues.openInBrowser"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
