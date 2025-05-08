@@ -92,6 +92,81 @@ exports.activate = function () {
     );
   });
 
+  nova.commands.register('github-issues.copyUrl', () => {
+    for (const [section, item] of Object.entries(selectedItems)) {
+      console.log(
+        `[Command] [Copy URL] Section "${section}" selected item:`,
+        item,
+      );
+
+      if (item?.issue?.html_url) {
+        nova.clipboard.writeText(item.issue.html_url);
+        console.log('[Command] URL copied to clipboard:', item.issue.html_url);
+        return;
+      }
+    }
+
+    console.warn('[Command] No selected node with valid issue URL to copy.');
+  });
+
+  nova.commands.register('github-issues.closeIssue', async () => {
+    await updateIssueState('closed', undefined);
+  });
+
+  nova.commands.register('github-issues.closeNotPlanned', async () => {
+    await updateIssueState('closed', 'not_planned');
+  });
+  nova.commands.register('github-issues.closeDuplicate', async () => {
+    await updateIssueState('closed', 'duplicate');
+  });
+
+  nova.commands.register('github-issues.reopenIssue', async () => {
+    for (const [section, item] of Object.entries(selectedItems)) {
+      if (!item?.issue || item.issue.state !== 'closed') continue;
+
+      const { token, owner, repo } = loadConfig();
+      const issueNumber = item.issue.number;
+
+      const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
+      const body = JSON.stringify({ state: 'open' });
+
+      const resp = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body,
+      });
+
+      if (resp.ok) {
+        console.log(`[Reopen] Issue #${issueNumber} reopened`);
+        // Reload the appropriate view
+        const view = {
+          'closed-issues': closedView,
+          'closed-pulls': closedPRView,
+        }[section];
+        const provider = {
+          'closed-issues': closedProvider,
+          'closed-pulls': closedPRProvider,
+        }[section];
+
+        if (provider && view) {
+          await provider.refresh();
+          view.reload();
+        }
+      } else {
+        console.error(
+          `[Reopen] Failed to reopen issue #${issueNumber}`,
+          await resp.text(),
+        );
+      }
+
+      break;
+    }
+  });
+
   // 5) When switching back to either view, re-fetch
   openView.onDidChangeVisibility((visible) => {
     if (visible) openProvider.refresh().then(() => openView.reload());
@@ -99,6 +174,24 @@ exports.activate = function () {
   closedView.onDidChangeVisibility((visible) => {
     if (visible) closedProvider.refresh().then(() => closedView.reload());
   });
+
+  // 6) Auto-refresh every 15 seconds
+  setInterval(
+    async () => {
+      await openProvider.refresh();
+      await closedProvider.refresh();
+      await openPRProvider.refresh();
+      await closedPRProvider.refresh();
+
+      openView.reload();
+      closedView.reload();
+      openPRView.reload();
+      closedPRView.reload();
+
+      console.log('[Auto-refresh] Views updated');
+    },
+    10 * 60 * 1000,
+  ); // 10 minutes
 };
 
 exports.deactivate = function () {
@@ -165,7 +258,7 @@ class GitHubIssuesProvider {
 
     this.rootItems = issues.map((i) => {
       const parent = new IssueItem(i);
-      this.itemsById.set(String(i.id), parent); // <-- Register ID → Item
+      this.itemsById.set(String(i.id), parent);
       if (i.state_reason === 'reopened') {
         const reasonItem = new IssueItem({
           title: 'Reopened',
@@ -180,11 +273,11 @@ class GitHubIssuesProvider {
           },
           not_planned: {
             text: 'Not Planned',
-            image: 'issue_not_planned', // ← rename your `circle-xmark` image folder to this
+            image: 'issue_not_planned',
           },
           duplicate: {
             text: 'Duplicate',
-            image: 'issue_duplicate', // optional, if you add one
+            image: 'issue_not_planned',
           },
         };
 
@@ -233,13 +326,13 @@ class GitHubIssuesProvider {
         parent.children.unshift(descriptionNode);
       }*/
 
-      if (this.type === 'pull' && i.draft) {
+      /*if (this.type === 'pull' && i.draft) {
         const draftItem = new IssueItem({
           title: 'Draft',
         });
         draftItem.parent = parent;
         parent.children.push(draftItem);
-      }
+      }*/
 
       const isClosed = i.state === 'closed';
 
@@ -263,14 +356,37 @@ class GitHubIssuesProvider {
         parent.children.push(updatedAt);
       }
 
-      if (isClosed && i.closed_at) {
+      if (this.type === 'issue' && isClosed && i.closed_at) {
         const closedAt = new IssueItem({
           title: 'Closed:',
           body: new Date(i.closed_at).toLocaleString(),
-          image: 'issue_closed',
+          image:
+            i.state_reason === 'not_planned' || i.state_reason === 'duplicate'
+              ? 'pr_closed'
+              : 'issue_closed',
         });
         closedAt.parent = parent;
         parent.children.push(closedAt);
+      }
+
+      if (this.type === 'pull') {
+        if (i.merged_at) {
+          const mergedItem = new IssueItem({
+            title: 'Merged:',
+            body: new Date(i.merged_at).toLocaleString(),
+            image: 'issue_closed',
+          });
+          mergedItem.parent = parent;
+          parent.children.push(mergedItem);
+        } else if (i.state === 'closed' && i.closed_at) {
+          const closedItem = new IssueItem({
+            title: 'Closed:',
+            body: new Date(i.closed_at).toLocaleString(),
+            image: 'pr_closed',
+          });
+          closedItem.parent = parent;
+          parent.children.push(closedItem);
+        }
       }
 
       if (i.user && i.user.login) {
@@ -374,20 +490,23 @@ class GitHubIssuesProvider {
       const isDraft = this.type === 'pull' && issue.draft === true;
 
       item.identifier = issue.id;
-      item.name = isDraft ? `[DRAFT] #${issue.number}` : `#${issue.number}`;
+      item.contextValue = 'issue-root';
+      item.name = isDraft ? `#${issue.number} [DRAFT]` : `#${issue.number}`;
       item.descriptiveText = issue.title;
 
       if (issue.body && issue.body.trim()) {
         item.tooltip = issue.body;
+      } else {
+        item.tooltip = 'No description provided.';
       }
 
+      const reason = issue.state_reason;
       if (isDraft) {
         item.color = Color.rgb(140 / 255, 140 / 255, 140 / 255); // muted gray
-      } else if (this.state === 'open') {
+      } else if (this.state === 'open' || reason === 'reopened') {
         item.color = Color.rgb(45 / 255, 164 / 255, 78 / 255); // GitHub open green
       } else {
         // it's closed — check state_reason
-        const reason = issue.state_reason;
         if (reason === 'not_planned' || reason === 'duplicate') {
           item.color = Color.rgb(110 / 255, 119 / 255, 129 / 255); // GitHub gray
         } else {
@@ -407,5 +526,59 @@ class GitHubIssuesProvider {
 
   getItemById(id) {
     return this.itemsById.get(String(id));
+  }
+}
+
+async function updateIssueState(newState, reason) {
+  for (const [section, item] of Object.entries(selectedItems)) {
+    if (!item?.issue || item.issue.state !== 'open') continue;
+
+    const { token, owner, repo } = loadConfig();
+    const issueNumber = item.issue.number;
+
+    const body = { state: newState };
+    if (reason) body.state_reason = reason;
+
+    const resp = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    if (resp.ok) {
+      console.log(
+        `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ''}`,
+      );
+      // Refresh
+      if (section === 'issues') {
+        setTimeout(async () => {
+          await openProvider.refresh();
+          await closedProvider.refresh();
+          openView.reload();
+          closedView.reload();
+        }, 5000);
+      } else if (section === 'pulls') {
+        setTimeout(async () => {
+          await openPRProvider.refresh();
+          await closedPRProvider.refresh();
+          openPRView.reload();
+          closedPRView.reload();
+        }, 5000);
+      }
+    } else {
+      console.error(
+        `[Update] Failed to update issue #${issueNumber}`,
+        await resp.text(),
+      );
+    }
+
+    break;
   }
 }

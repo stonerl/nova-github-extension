@@ -34,14 +34,9 @@
   ],
 
   "entitlements": {
+    "clipboard": true,
     "filesystem": "readwrite",
     "requests": true
-  },
-
-  "commands": {
-    "identifier": "github-issues.openInBrowser",
-    "name": "Open on GitHub",
-    "action": "openInBrowser"
   },
 
   "sidebars": [
@@ -69,7 +64,29 @@
           "contextCommands": [
             {
               "title": "Open on GitHub",
-              "command": "github-issues.openInBrowser"
+              "command": "github-issues.openInBrowser",
+              "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Copy GitHub URL",
+              "command": "github-issues.copyUrl",
+              "when": "viewItem == 'issue-root'"
+            },
+            { "separator": true },
+            {
+              "title": "Close Issue",
+              "command": "github-issues.closeIssue",
+              "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Close as Not Planned",
+              "command": "github-issues.closeNotPlanned",
+              "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Close as Duplicate",
+              "command": "github-issues.closeDuplicate",
+              "when": "viewItem == 'issue-root'"
             }
           ]
         },
@@ -90,7 +107,19 @@
           "contextCommands": [
             {
               "title": "Open on GitHub",
-              "command": "github-issues.openInBrowser"
+              "command": "github-issues.openInBrowser",
+              "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Copy GitHub URL",
+              "command": "github-issues.copyUrl",
+              "when": "viewItem == 'issue-root'"
+            },
+            { "separator": true },
+            {
+              "title": "Reopen Issue",
+              "command": "github-issues.reopenIssue",
+              "when": "viewItem == 'issue-root'"
             }
           ]
         },
@@ -111,7 +140,13 @@
           "contextCommands": [
             {
               "title": "Open on GitHub",
-              "command": "github-issues.openInBrowser"
+              "command": "github-issues.openInBrowser",
+              "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Copy GitHub URL",
+              "command": "github-issues.copyUrl",
+              "when": "viewItem == 'issue-root'"
             }
           ]
         },
@@ -132,7 +167,13 @@
           "contextCommands": [
             {
               "title": "Open on GitHub",
-              "command": "github-issues.openInBrowser"
+              "command": "github-issues.openInBrowser",
+              "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Copy GitHub URL",
+              "command": "github-issues.copyUrl",
+              "when": "viewItem == 'issue-root'"
             }
           ]
         }
