@@ -55,6 +55,12 @@
           "placeholderText": "No open issues.",
           "headerCommands": [
             {
+              "title": "New Issue",
+              "image": "__builtin.add",
+              "tooltip": "Open new GitHub issue",
+              "command": "github-issues.newIssue"
+            },
+            {
               "title": "Refresh",
               "image": "__builtin.refresh",
               "tooltip": "Reload open issues",
@@ -130,6 +136,12 @@
           "placeholderImage": "sidebar-large",
           "placeholderText": "No open pull requests.",
           "headerCommands": [
+            {
+              "title": "New Pull Request",
+              "image": "__builtin.add",
+              "tooltip": "Open new GitHub pull request",
+              "command": "github-issues.newPullRequest"
+            },
             {
               "title": "Refresh",
               "image": "__builtin.refresh",

@@ -76,6 +76,28 @@ exports.activate = function () {
     await closedPRView.reload();
   });
 
+  nova.commands.register('github-issues.newIssue', () => {
+    const { owner, repo } = loadConfig();
+    if (!owner || !repo) {
+      console.warn('[NewIssue] Missing owner/repo in config');
+      return;
+    }
+    const url = `https://github.com/${owner}/${repo}/issues/new`;
+    console.log('[NewIssue] Opening:', url);
+    nova.openURL(url);
+  });
+
+  nova.commands.register('github-issues.newPullRequest', () => {
+    const { owner, repo } = loadConfig();
+    if (!owner || !repo) {
+      console.warn('[NewPullRequest] Missing owner/repo in config');
+      return;
+    }
+    const url = `https://github.com/${owner}/${repo}/compare`;
+    console.log('[NewPullRequest] Opening:', url);
+    nova.openURL(url);
+  });
+
   nova.commands.register('github-issues.openInBrowser', () => {
     for (const [section, item] of Object.entries(selectedItems)) {
       console.log(`[Command] Section "${section}" selected item:`, item);
