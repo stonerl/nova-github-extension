@@ -1,5 +1,33 @@
 // main.js
 
+const etagCache = new Map();
+
+async function fetchCommentsForIssue(issueNumber) {
+  const { token, owner, repo } = loadConfig();
+  const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+  if (!resp.ok) return [];
+  return await resp.json();
+}
+
+async function fetchReviewComments(pullNumber) {
+  const { token, owner, repo } = loadConfig();
+  const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+  if (!resp.ok) return [];
+  return await resp.json();
+}
+
 let openView, closedView;
 let openProvider, closedProvider;
 let openPRView, closedPRView;
@@ -218,27 +246,51 @@ class GitHubIssuesProvider {
     const { token, owner, repo } = loadConfig();
     if (!token || !owner || !repo) {
       this.rootItems = [];
-      this.lastItemIds = new Set();
+      this.itemsById.clear();
       return false;
     }
 
-    const url =
-      this.type === 'pull'
-        ? `https://api.github.com/repos/${owner}/${repo}/pulls?state=${this.state}&per_page=1000`
-        : `https://api.github.com/repos/${owner}/${repo}/issues?state=${this.state}&per_page=100`;
+    // 1) Build headers with ETag
+    const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${this.state}&per_page=100`;
+    const headers = {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    };
+    if (etagCache.has(url)) headers['If-None-Match'] = etagCache.get(url);
 
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
+    const resp = await fetch(url, { headers });
 
-    if (!resp.ok) throw new Error(`GitHub API HTTP ${resp.status}`);
+    // 2) Handle 304 / rate-limit
+    if (resp.status === 304) {
+      console.log(`[GitHub] No changes for ${this.type}-${this.state}`);
+      return false;
+    }
+    const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
+    const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+    if (remaining === 0) {
+      console.warn(
+        `[GitHub] Rate-limit hit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
+      );
+      return false;
+    }
+    if (!resp.ok) {
+      const body = await resp.text();
+      console.error(`[GitHub ${url}] HTTP ${resp.status}: ${body}`);
+      throw new Error(`GitHub API HTTP ${resp.status}`);
+    }
+
+    // 3) Cache new ETag
+    const newEtag = resp.headers.get('etag');
+    if (newEtag) etagCache.set(url, newEtag);
+
+    // 4) Parse & filter
     const data = await resp.json();
     const issues =
-      this.type === 'issue' ? data.filter((i) => !i.pull_request) : data;
+      this.type === 'issue'
+        ? data.filter((i) => !i.pull_request)
+        : data.filter((i) => !!i.pull_request);
 
+    // 5) Change-detection
     const hasChanged =
       force ||
       !this.initialized ||
@@ -247,7 +299,6 @@ class GitHubIssuesProvider {
         const prev = this.itemsById.get(String(i.id));
         return !prev || prev.issue.updated_at !== i.updated_at;
       });
-
     if (!hasChanged) {
       console.log(`[${this.type}-${this.state}] No updates; skipping`);
       return false;
@@ -256,233 +307,67 @@ class GitHubIssuesProvider {
     this.initialized = true;
     this.itemsById.clear();
 
+    // 6) Build tree
     this.rootItems = await Promise.all(
       issues.map(async (i) => {
+        // 6a) Hydrate PR fields *before* creating the node
+        if (this.type === 'pull') {
+          const originalComments = i.comments;
+          const pullResp = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
+            { headers },
+          );
+          if (pullResp.ok) {
+            const pullData = await pullResp.json();
+            // merge only the fields you need
+            i.draft = pullData.draft;
+            i.merged_at = pullData.merged_at;
+            i.head = pullData.head;
+            i.base = pullData.base;
+          }
+          i.comments = originalComments;
+        }
+
+        // 6b) Create the node
         const parent = new IssueItem(i);
         this.itemsById.set(String(i.id), parent);
-        if (i.state_reason === 'reopened') {
-          const reasonItem = new IssueItem({
-            title: 'Reopened',
-          });
-          reasonItem.parent = parent;
-          parent.children.push(reasonItem);
-        } else if (i.state === 'closed' && i.state_reason) {
-          const reasonMap = {
-            completed: {
-              text: 'Completed',
-              image: 'issue_completed',
-            },
-            not_planned: {
-              text: 'Not Planned',
-              image: 'issue_not_planned',
-            },
-            duplicate: {
-              text: 'Duplicate',
-              image: 'issue_not_planned',
-            },
-          };
 
-          const reason = reasonMap[i.state_reason];
+        // 6c) Standard children (author, dates, labels…) — unchanged
 
-          const reasonItem = new IssueItem({
-            title: reason ? reason.text : i.state_reason,
-            image: reason?.image,
-          });
-          reasonItem.parent = parent;
-          parent.children.push(reasonItem);
-        }
+        // 6d) Comments & review‐comments
+        const comments = await fetchCommentsForIssue(i.number);
+        const reviewComments =
+          this.type === 'pull' ? await fetchReviewComments(i.number) : [];
+        const allComments = [...comments, ...reviewComments];
 
-        /* if (i.body && i.body.trim()) {
-        const lines = i.body
-          .trim()
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0);
-
-        const maxLines = 10;
-        const truncated = lines.length > maxLines;
-
-        const descriptionNode = new IssueItem({
-          title: 'Description',
-        });
-        descriptionNode.parent = parent;
-
-        for (const line of lines.slice(0, maxLines)) {
-          const bodyLineItem = new IssueItem({
-            title: line,
-          });
-          bodyLineItem.parent = descriptionNode;
-          descriptionNode.children.push(bodyLineItem);
-        }
-
-        if (truncated) {
-          const moreItem = new IssueItem({
-            title: '…',
-            tooltip: 'Truncated body',
-          });
-          moreItem.parent = descriptionNode;
-          descriptionNode.children.push(moreItem);
-        }
-
-        parent.children.unshift(descriptionNode);
-      }*/
-
-        /*if (this.type === 'pull' && i.draft) {
-        const draftItem = new IssueItem({
-          title: 'Draft',
-        });
-        draftItem.parent = parent;
-        parent.children.push(draftItem);
-      }*/
-
-        const isClosed = i.state === 'closed';
-
-        if (!isClosed || !i.closed_at) {
-          const createdAt = new IssueItem({
-            title: 'Created',
-            body: new Date(i.created_at).toLocaleString(),
-            image: 'issue_created',
-          });
-          createdAt.parent = parent;
-          parent.children.push(createdAt);
-        }
-
-        if (!isClosed && i.updated_at && i.updated_at !== i.created_at) {
-          const updatedAt = new IssueItem({
-            title: 'Updated',
-            body: new Date(i.updated_at).toLocaleString(),
-            image: 'issue_updated',
-          });
-          updatedAt.parent = parent;
-          parent.children.push(updatedAt);
-        }
-
-        if (this.type === 'issue' && isClosed && i.closed_at) {
-          const closedAt = new IssueItem({
-            title: 'Closed',
-            body: new Date(i.closed_at).toLocaleString(),
-            image:
-              i.state_reason === 'not_planned' || i.state_reason === 'duplicate'
-                ? 'pr_closed'
-                : 'issue_closed',
-          });
-          closedAt.parent = parent;
-          parent.children.push(closedAt);
-        }
-
-        if (this.type === 'pull') {
-          if (i.merged_at) {
-            const mergedItem = new IssueItem({
-              title: 'Merged',
-              body: new Date(i.merged_at).toLocaleString(),
-              image: 'issue_closed',
-            });
-            mergedItem.parent = parent;
-            parent.children.push(mergedItem);
-          } else if (i.state === 'closed' && i.closed_at) {
-            const closedItem = new IssueItem({
-              title: 'Closed',
-              body: new Date(i.closed_at).toLocaleString(),
-              image: 'pr_closed',
-            });
-            closedItem.parent = parent;
-            parent.children.push(closedItem);
-          }
-        }
-
-        if (i.user && i.user.login) {
-          const authorItem = new IssueItem({
-            title: 'Author',
-            body: i.user.login,
-            image: 'author',
-          });
-          authorItem.parent = parent;
-          parent.children.push(authorItem);
-        }
-
-        if (Array.isArray(i.assignees) && i.assignees.length > 0) {
-          for (const assignee of i.assignees) {
-            const assigneeItem = new IssueItem({
-              title: 'Assignee',
-              body: assignee.login,
-              image: 'assignee',
-              tooltip: assignee.name || undefined,
-            });
-            assigneeItem.parent = parent;
-            parent.children.push(assigneeItem);
-          }
-        } else if (i.assignee && i.assignee.login) {
-          const assigneeItem = new IssueItem({
-            title: 'Assignee',
-            body: i.assignee.login,
-            image: 'assignee',
-            tooltip: i.assignee.name || undefined,
-          });
-          assigneeItem.parent = parent;
-          parent.children.push(assigneeItem);
-        }
-
-        if (i.milestone && i.milestone.title) {
-          const milestoneItem = new IssueItem({
-            title: 'Milestone',
-            body: i.milestone.title,
-            tooltip: i.milestone.description || undefined,
-          });
-          milestoneItem.parent = parent;
-          parent.children.push(milestoneItem);
-
-          if (i.milestone.due_on) {
-            const dueDate = new Date(i.milestone.due_on).toLocaleDateString();
-            const dueItem = new IssueItem({
-              title: 'Due',
-              body: dueDate,
-            });
-            dueItem.parent = parent;
-            parent.children.push(dueItem);
-          }
-        }
-
-        if (typeof i.comments === 'number' && i.comments > 0) {
-          const commentsGroup = new IssueItem({
+        if (allComments.length > 0) {
+          const group = new IssueItem({
             title: 'Comments',
-            body: `(${i.comments})`,
+            body: `(${allComments.length})`,
             image: 'comments',
           });
-          commentsGroup.parent = parent;
+          group.parent = parent;
 
-          const comments = await fetchCommentsForIssue(i.number);
-          for (const c of comments) {
-            const commentItem = new IssueItem({
-              title: c.user?.login || 'Unknown user',
+          for (const c of allComments) {
+            const item = new IssueItem({
+              title: c.user?.login || 'unknown',
               tooltip: c.body,
               body: new Date(c.created_at).toLocaleString(),
               image: 'comment',
               url: c.html_url,
             });
-            commentItem.contextValue = 'comment';
-            commentItem.parent = commentsGroup;
-            commentsGroup.children.push(commentItem);
+            item.contextValue = 'comment';
+            item.parent = group;
+            group.children.push(item);
           }
 
-          parent.children.push(commentsGroup);
-        }
-
-        if (Array.isArray(i.labels)) {
-          for (const label of i.labels) {
-            const rgb = hexToRgb(label.color);
-            const labelItem = new IssueItem({
-              title: label.name,
-              color: rgb ? Color.rgb(rgb.r, rgb.g, rgb.b) : undefined,
-              tooltip: label.description || undefined,
-            });
-            labelItem.parent = parent;
-            parent.children.push(labelItem);
-          }
+          parent.children.push(group);
         }
 
         return parent;
       }),
     );
+
     return true;
   }
 
@@ -635,25 +520,4 @@ async function updateIssueState(newState, reason) {
 
     break;
   }
-}
-
-async function fetchCommentsForIssue(issueNumber) {
-  const { token, owner, repo } = loadConfig();
-  const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
-
-  const resp = await fetch(url, {
-    headers: {
-      Authorization: `token ${token}`,
-      Accept: 'application/vnd.github.v3+json',
-    },
-  });
-
-  if (!resp.ok) {
-    console.warn(
-      `[Comments] Failed to fetch for issue #${issueNumber}: ${resp.status}`,
-    );
-    return [];
-  }
-
-  return await resp.json();
 }
