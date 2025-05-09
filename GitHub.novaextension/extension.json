@@ -41,7 +41,7 @@
     },
     {
       "key": "maxRecentItems",
-      "type": "text",
+      "type": "string",
       "title": "Recent Items",
       "description": "Number of recently updated issues and PRs to display",
       "required": true,

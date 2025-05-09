@@ -129,7 +129,20 @@ const dataStore = {
       }
 
       allItems = allItems.slice(0, maxRecentItems);
-      this.etags[key] = etagUsed ? this.etags[key] : null;
+
+      const etag = resp.headers.get('etag');
+      // Only store ETag if present and no pagination was used
+      if (
+        resp.headers.has('etag') &&
+        page === 1 &&
+        allItems.length <= itemsPerPage
+      ) {
+        this.etags[key] = resp.headers.get('etag');
+      } else {
+        // Don't overwrite with null if we didn't get a usable one
+        this.etags[key] = this.etags[key] ?? null;
+      }
+
       this.cache[key] = allItems;
       saveCache(type, state, allItems);
       return allItems;
