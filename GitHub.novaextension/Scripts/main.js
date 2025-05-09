@@ -6,9 +6,11 @@ function cachePath(state) {
   // build a per-repo subfolder under cacheDir
   const repoDir = `${cacheDir}/${owner}-${repo}`;
   try {
+    // if it doesn’t throw, it already exists
+    nova.fs.access(repoDir, nova.fs.F_OK);
+  } catch {
+    // only try to create if access() failed
     nova.fs.mkdir(repoDir);
-  } catch (e) {
-    // subfolder already exists or failed: no-op
   }
   return `${repoDir}/issues-${state}.json`;
 }
@@ -16,7 +18,7 @@ function cachePath(state) {
 function saveCache(state, data) {
   const path = cachePath(state);
   try {
-    const file = nova.fs.open(path, 'w+');
+    const file = nova.fs.open(path, 'w+t');
     file.write(JSON.stringify(data));
     file.close();
   } catch (e) {
@@ -113,14 +115,31 @@ const dataStore = {
 async function fetchCommentsForIssue(issueNumber) {
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
-  const resp = await fetch(url, {
-    headers: {
-      Authorization: `token ${token}`,
-      Accept: 'application/vnd.github.v3+json',
-    },
-  });
-  if (!resp.ok) return [];
-  return await resp.json();
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+    const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
+    const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+    if (remaining === 0) {
+      console.warn(
+        `[GitHub] Comments rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
+      );
+      // optionally: return loadCacheComments(issueNumber) if you have one
+      return [];
+    }
+    if (!resp.ok) {
+      throw new Error(`Comments fetch HTTP ${resp.status}`);
+    }
+    return await resp.json();
+  } catch (err) {
+    console.warn(`[Comments] fetch failed for #${issueNumber}:`, err);
+    // optionally: return loadCacheComments(issueNumber);
+    return [];
+  }
 }
 
 async function fetchReviewComments(pullNumber) {
@@ -158,9 +177,9 @@ function loadConfig() {
 exports.activate = function () {
   // ensure your extension's global storage folder exists
   try {
+    nova.fs.access(cacheDir, nova.fs.F_OK);
+  } catch {
     nova.fs.mkdir(cacheDir);
-  } catch (e) {
-    // already exists or failed: no-op
   }
 
   // Instantiate providers
@@ -412,6 +431,7 @@ class GitHubIssuesProvider {
             i.merged_at = pullData.merged_at;
             i.head = pullData.head;
             i.base = pullData.base;
+            i.review_comments = pullData.review_comments;
           }
           i.comments = originalComments;
         }
@@ -541,11 +561,21 @@ class GitHubIssuesProvider {
         }
 
         // 6d) Comments & review‐comments
-        const comments = await fetchCommentsForIssue(i.number);
+        const comments =
+          i.comments > 0 ? await fetchCommentsForIssue(i.number) : [];
+
         const reviewComments =
-          this.type === 'pull' ? await fetchReviewComments(i.number) : [];
+          this.type === 'pull' && i.review_comments > 0
+            ? await fetchReviewComments(i.number)
+            : [];
         const allComments = [...comments, ...reviewComments];
 
+        console.log(
+          `[Comments] Issue #${i.number}: issueComments=`,
+          comments.length,
+          'reviewComments=',
+          reviewComments.length,
+        );
         if (allComments.length > 0) {
           const group = new IssueItem({
             title: 'Comments',
