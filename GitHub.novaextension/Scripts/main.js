@@ -1,6 +1,114 @@
 // main.js
+const cacheDir = nova.extension.globalStoragePath;
 
-const etagCache = new Map();
+function cachePath(state) {
+  const { owner, repo } = loadConfig();
+  // build a per-repo subfolder under cacheDir
+  const repoDir = `${cacheDir}/${owner}-${repo}`;
+  try {
+    nova.fs.mkdir(repoDir);
+  } catch (e) {
+    // subfolder already exists or failed: no-op
+  }
+  return `${repoDir}/issues-${state}.json`;
+}
+
+function saveCache(state, data) {
+  const path = cachePath(state);
+  try {
+    const file = nova.fs.open(path, 'w+');
+    file.write(JSON.stringify(data));
+    file.close();
+  } catch (e) {
+    console.warn('[Cache] write failed:', e);
+  }
+}
+
+function loadCache(state) {
+  const path = cachePath(state);
+  try {
+    const file = nova.fs.open(path, 'r');
+    const text = file.read();
+    file.close();
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+const dataStore = {
+  cache: { open: null, closed: null },
+  etags: { open: null, closed: null },
+
+  async fetchState(state, token, owner, repo) {
+    // 1) If we have it in memory, return it immediately
+    if (this.cache[state]) {
+      return this.cache[state];
+    }
+
+    const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=100`;
+    const headers = {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    };
+    if (this.etags[state]) {
+      headers['If-None-Match'] = this.etags[state];
+    }
+
+    try {
+      // 2) Try the network
+      const resp = await fetch(url, { headers });
+
+      // 🚦 Rate-limit check
+      const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
+      const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+      if (remaining === 0) {
+        // log exactly the warning you used to see
+        console.warn(
+          `[GitHub] Rate-limit hit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
+        );
+        // fallback to disk if we have it
+        const disk = loadCache(state);
+        if (disk) {
+          this.cache[state] = disk;
+          return disk;
+        }
+        // otherwise we'll fall through to the error case below
+      }
+
+      if (resp.status === 304) {
+        // Not changed — load from disk (or memory if it was there)
+        const disk = loadCache(state);
+        if (disk) {
+          this.cache[state] = disk;
+          return disk;
+        }
+        // if no disk snapshot, fall through to memory or empty
+      }
+
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      // 3) Success: parse, cache in memory & on disk, stash ETag
+      const data = await resp.json();
+      this.etags[state] = resp.headers.get('etag');
+      this.cache[state] = data;
+      saveCache(state, data);
+      return data;
+    } catch (err) {
+      // 4) Network failure or rate-limit: fall back to disk
+      console.warn(`[dataStore] fetchState(${state}) failed:`, err);
+      const disk = loadCache(state);
+      if (disk) {
+        this.cache[state] = disk;
+        return disk;
+      }
+      // no disk to fall back on → rethrow
+      throw err;
+    }
+  },
+};
 
 async function fetchCommentsForIssue(issueNumber) {
   const { token, owner, repo } = loadConfig();
@@ -28,48 +136,6 @@ async function fetchReviewComments(pullNumber) {
   return await resp.json();
 }
 
-const cacheDir = nova.extension.globalStoragePath;
-
-function cacheDirFor(state, type) {
-  const { owner, repo } = loadConfig();
-  // or: const ws = nova.workspace.path.split('/').pop();
-  return `${cacheDir}/${owner}-${repo}`;
-}
-
-function cachePath(state, type) {
-  const dir = cacheDirFor(state, type);
-  try {
-    nova.fs.mkdir(dir);
-  } catch {} // ensure subfolder
-  return `${dir}/issues-${state}-${type}.json`;
-}
-
-function saveCache(state, type, rawData) {
-  const path = cachePath(state, type);
-  try {
-    // Open for writing (text mode, truncate)
-    const file = nova.fs.open(path, 'w+');
-    file.write(JSON.stringify(rawData));
-    file.close();
-  } catch (e) {
-    console.warn('[Cache] write failed:', e);
-  }
-}
-
-function loadCache(state, type) {
-  const path = cachePath(state, type);
-  try {
-    // Open for reading
-    const file = nova.fs.open(path, 'r');
-    const text = file.read();
-    file.close();
-    return JSON.parse(text);
-  } catch (e) {
-    // missing or malformed cache
-    return null;
-  }
-}
-
 let openView, closedView;
 let openProvider, closedProvider;
 let openPRView, closedPRView;
@@ -90,10 +156,11 @@ function loadConfig() {
 }
 
 exports.activate = function () {
+  // ensure your extension's global storage folder exists
   try {
     nova.fs.mkdir(cacheDir);
   } catch (e) {
-    console.warn('[Cache] could not create cache directory', e);
+    // already exists or failed: no-op
   }
 
   // Instantiate providers
@@ -292,49 +359,17 @@ class GitHubIssuesProvider {
 
   async refresh(force = false) {
     const { token, owner, repo } = loadConfig();
-    if (!token || !owner || !repo) {
-      this.rootItems = [];
-      this.itemsById.clear();
-      return false;
-    }
-
-    // 1) Build headers with ETag
-    const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${this.state}&per_page=100`;
     const headers = {
       Authorization: `token ${token}`,
       Accept: 'application/vnd.github.v3+json',
     };
-    if (etagCache.has(url)) headers['If-None-Match'] = etagCache.get(url);
 
     let data;
     try {
-      const resp = await fetch(url, { headers });
-
-      if (resp.status === 304) {
-        console.log(`[GitHub] No changes for ${this.type}-${this.state}`);
-        return false;
-      }
-      const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
-      const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
-      if (remaining === 0) {
-        console.warn(
-          `[GitHub] Rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
-        );
-        return false;
-      }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-      // grab & cache
-      data = await resp.json();
-      saveCache(this.state, this.type, data);
-      // update ETag cache
-      const newEtag = resp.headers.get('etag');
-      if (newEtag) etagCache.set(url, newEtag);
+      data = await dataStore.fetchState(this.state, token, owner, repo);
     } catch (err) {
-      console.warn('[GitHub] fetch failed, loading cache:', err);
-      const fromDisk = loadCache(this.state, this.type);
-      if (!fromDisk) throw err;
-      data = fromDisk;
+      console.error(`[${this.type}-${this.state}] cannot load data:`, err);
+      return false;
     }
 
     // 4) Parse & filter
@@ -385,7 +420,122 @@ class GitHubIssuesProvider {
         const parent = new IssueItem(i);
         this.itemsById.set(String(i.id), parent);
 
-        // 6c) Standard children (author, dates, labels…) — unchanged
+        // 6c) Standard children (state, dates, author, assignees, milestone, labels)
+        // – show reopen/close reason
+        if (i.state_reason === 'reopened') {
+          const reasonItem = new IssueItem({ title: 'Reopened' });
+          reasonItem.parent = parent;
+          parent.children.push(reasonItem);
+        } else if (i.state === 'closed' && i.state_reason) {
+          const map = {
+            completed: { text: 'Completed', image: 'issue_completed' },
+            not_planned: { text: 'Not Planned', image: 'issue_not_planned' },
+            duplicate: { text: 'Duplicate', image: 'issue_not_planned' },
+          };
+          const r = map[i.state_reason] || { text: i.state_reason };
+          const reasonItem = new IssueItem({ title: r.text, image: r.image });
+          reasonItem.parent = parent;
+          parent.children.push(reasonItem);
+        }
+
+        // – creation & update timestamps
+        const isClosed = i.state === 'closed';
+        if (!isClosed || !i.closed_at) {
+          const createdAt = new IssueItem({
+            title: 'Created',
+            body: new Date(i.created_at).toLocaleString(),
+            image: 'issue_created',
+          });
+          createdAt.parent = parent;
+          parent.children.push(createdAt);
+        }
+        if (!isClosed && i.updated_at !== i.created_at) {
+          const updatedAt = new IssueItem({
+            title: 'Updated',
+            body: new Date(i.updated_at).toLocaleString(),
+            image: 'issue_updated',
+          });
+          updatedAt.parent = parent;
+          parent.children.push(updatedAt);
+        }
+
+        // – closed / merged for issues & PRs
+        if (this.type === 'issue' && isClosed) {
+          const closedAt = new IssueItem({
+            title: 'Closed',
+            body: new Date(i.closed_at).toLocaleString(),
+            image: 'issue_closed',
+          });
+          closedAt.parent = parent;
+          parent.children.push(closedAt);
+        }
+        if (this.type === 'pull') {
+          if (i.merged_at) {
+            const merged = new IssueItem({
+              title: 'Merged',
+              body: new Date(i.merged_at).toLocaleString(),
+              image: 'issue_closed',
+            });
+            merged.parent = parent;
+            parent.children.push(merged);
+          } else if (isClosed) {
+            const prClosed = new IssueItem({
+              title: 'Closed',
+              body: new Date(i.closed_at).toLocaleString(),
+              image: 'pr_closed',
+            });
+            prClosed.parent = parent;
+            parent.children.push(prClosed);
+          }
+        }
+
+        // – author
+        if (i.user?.login) {
+          const author = new IssueItem({
+            title: 'Author',
+            body: i.user.login,
+            image: 'author',
+          });
+          author.parent = parent;
+          parent.children.push(author);
+        }
+
+        // – assignees
+        const assignees = i.assignees?.length
+          ? i.assignees
+          : i.assignee
+            ? [i.assignee]
+            : [];
+        for (const a of assignees) {
+          const asn = new IssueItem({
+            title: 'Assignee',
+            body: a.login,
+            image: 'assignee',
+          });
+          asn.parent = parent;
+          parent.children.push(asn);
+        }
+
+        // – milestone
+        if (i.milestone?.title) {
+          const ms = new IssueItem({
+            title: 'Milestone',
+            body: i.milestone.title,
+          });
+          ms.parent = parent;
+          parent.children.push(ms);
+        }
+
+        // – labels
+        for (const lbl of i.labels || []) {
+          const rgb = hexToRgb(lbl.color);
+          const li = new IssueItem({
+            title: lbl.name,
+            color: rgb && Color.rgb(rgb.r, rgb.g, rgb.b),
+          });
+          li.parent = parent;
+          parent.children.push(li);
+        }
 
         // 6d) Comments & review‐comments
         const comments = await fetchCommentsForIssue(i.number);
