@@ -169,9 +169,9 @@ function loadCommentCache(type, number) {
     const text = file.read();
     file.close();
     const { etag, data } = JSON.parse(text);
-    return { etag, data };
-  } catch {
     return { etag, data, count: data.length };
+  } catch {
+    return { etag: null, data: [], count: 0 };
   }
 }
 
