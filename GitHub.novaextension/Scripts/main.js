@@ -636,10 +636,30 @@ class GitHubIssuesProvider {
           group.parent = parent;
 
           for (const c of allComments) {
+            const commentDate = new Date(c.created_at).toLocaleString();
+
+            const lines = c.body.split(/\r?\n/);
+            const firstLine = lines.find((l) => l.trim() !== '') || '';
+
+            // build a tooltip of up to 25 lines
+            const allLines = c.body.split(/\r?\n/);
+            const snippet = allLines.slice(0, 25);
+            if (allLines.length > 25) snippet.push('…');
+            const tooltipBody = snippet.join('\n');
+            const author = c.user?.login || 'unknown';
+            const tooltip = `${author} on ${commentDate}:\n\n${tooltipBody}`;
+
+            const date = new Date(c.created_at);
+            const shortDate = date.toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+            }); // “Apr 2”
+            const title = `${author} on ${shortDate}`;
+
             const item = new IssueItem({
-              title: c.user?.login || 'unknown',
-              tooltip: c.body,
-              body: new Date(c.created_at).toLocaleString(),
+              title,
+              body: firstLine,
+              tooltip,
               image: 'comment',
               url: c.html_url,
             });
