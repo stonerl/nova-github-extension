@@ -254,42 +254,43 @@ class GitHubIssuesProvider {
     this.initialized = true;
     this.itemsById.clear();
 
-    this.rootItems = issues.map((i) => {
-      const parent = new IssueItem(i);
-      this.itemsById.set(String(i.id), parent);
-      if (i.state_reason === 'reopened') {
-        const reasonItem = new IssueItem({
-          title: 'Reopened',
-        });
-        reasonItem.parent = parent;
-        parent.children.push(reasonItem);
-      } else if (i.state === 'closed' && i.state_reason) {
-        const reasonMap = {
-          completed: {
-            text: 'Completed',
-            image: 'issue_completed',
-          },
-          not_planned: {
-            text: 'Not Planned',
-            image: 'issue_not_planned',
-          },
-          duplicate: {
-            text: 'Duplicate',
-            image: 'issue_not_planned',
-          },
-        };
+    this.rootItems = await Promise.all(
+      issues.map(async (i) => {
+        const parent = new IssueItem(i);
+        this.itemsById.set(String(i.id), parent);
+        if (i.state_reason === 'reopened') {
+          const reasonItem = new IssueItem({
+            title: 'Reopened',
+          });
+          reasonItem.parent = parent;
+          parent.children.push(reasonItem);
+        } else if (i.state === 'closed' && i.state_reason) {
+          const reasonMap = {
+            completed: {
+              text: 'Completed',
+              image: 'issue_completed',
+            },
+            not_planned: {
+              text: 'Not Planned',
+              image: 'issue_not_planned',
+            },
+            duplicate: {
+              text: 'Duplicate',
+              image: 'issue_not_planned',
+            },
+          };
 
-        const reason = reasonMap[i.state_reason];
+          const reason = reasonMap[i.state_reason];
 
-        const reasonItem = new IssueItem({
-          title: reason ? reason.text : i.state_reason,
-          image: reason?.image,
-        });
-        reasonItem.parent = parent;
-        parent.children.push(reasonItem);
-      }
+          const reasonItem = new IssueItem({
+            title: reason ? reason.text : i.state_reason,
+            image: reason?.image,
+          });
+          reasonItem.parent = parent;
+          parent.children.push(reasonItem);
+        }
 
-      /* if (i.body && i.body.trim()) {
+        /* if (i.body && i.body.trim()) {
         const lines = i.body
           .trim()
           .split(/\r?\n/)
@@ -324,7 +325,7 @@ class GitHubIssuesProvider {
         parent.children.unshift(descriptionNode);
       }*/
 
-      /*if (this.type === 'pull' && i.draft) {
+        /*if (this.type === 'pull' && i.draft) {
         const draftItem = new IssueItem({
           title: 'Draft',
         });
@@ -332,138 +333,152 @@ class GitHubIssuesProvider {
         parent.children.push(draftItem);
       }*/
 
-      const isClosed = i.state === 'closed';
+        const isClosed = i.state === 'closed';
 
-      if (!isClosed || !i.closed_at) {
-        const createdAt = new IssueItem({
-          title: 'Created:',
-          body: new Date(i.created_at).toLocaleString(),
-          image: 'issue_created',
-        });
-        createdAt.parent = parent;
-        parent.children.push(createdAt);
-      }
-
-      if (!isClosed && i.updated_at && i.updated_at !== i.created_at) {
-        const updatedAt = new IssueItem({
-          title: 'Updated:',
-          body: new Date(i.updated_at).toLocaleString(),
-          image: 'issue_updated',
-        });
-        updatedAt.parent = parent;
-        parent.children.push(updatedAt);
-      }
-
-      if (this.type === 'issue' && isClosed && i.closed_at) {
-        const closedAt = new IssueItem({
-          title: 'Closed:',
-          body: new Date(i.closed_at).toLocaleString(),
-          image:
-            i.state_reason === 'not_planned' || i.state_reason === 'duplicate'
-              ? 'pr_closed'
-              : 'issue_closed',
-        });
-        closedAt.parent = parent;
-        parent.children.push(closedAt);
-      }
-
-      if (this.type === 'pull') {
-        if (i.merged_at) {
-          const mergedItem = new IssueItem({
-            title: 'Merged:',
-            body: new Date(i.merged_at).toLocaleString(),
-            image: 'issue_closed',
+        if (!isClosed || !i.closed_at) {
+          const createdAt = new IssueItem({
+            title: 'Created:',
+            body: new Date(i.created_at).toLocaleString(),
+            image: 'issue_created',
           });
-          mergedItem.parent = parent;
-          parent.children.push(mergedItem);
-        } else if (i.state === 'closed' && i.closed_at) {
-          const closedItem = new IssueItem({
+          createdAt.parent = parent;
+          parent.children.push(createdAt);
+        }
+
+        if (!isClosed && i.updated_at && i.updated_at !== i.created_at) {
+          const updatedAt = new IssueItem({
+            title: 'Updated:',
+            body: new Date(i.updated_at).toLocaleString(),
+            image: 'issue_updated',
+          });
+          updatedAt.parent = parent;
+          parent.children.push(updatedAt);
+        }
+
+        if (this.type === 'issue' && isClosed && i.closed_at) {
+          const closedAt = new IssueItem({
             title: 'Closed:',
             body: new Date(i.closed_at).toLocaleString(),
-            image: 'pr_closed',
+            image:
+              i.state_reason === 'not_planned' || i.state_reason === 'duplicate'
+                ? 'pr_closed'
+                : 'issue_closed',
           });
-          closedItem.parent = parent;
-          parent.children.push(closedItem);
+          closedAt.parent = parent;
+          parent.children.push(closedAt);
         }
-      }
 
-      if (i.user && i.user.login) {
-        const authorItem = new IssueItem({
-          title: 'Author:',
-          body: i.user.login,
-          image: 'author',
-        });
-        authorItem.parent = parent;
-        parent.children.push(authorItem);
-      }
+        if (this.type === 'pull') {
+          if (i.merged_at) {
+            const mergedItem = new IssueItem({
+              title: 'Merged:',
+              body: new Date(i.merged_at).toLocaleString(),
+              image: 'issue_closed',
+            });
+            mergedItem.parent = parent;
+            parent.children.push(mergedItem);
+          } else if (i.state === 'closed' && i.closed_at) {
+            const closedItem = new IssueItem({
+              title: 'Closed:',
+              body: new Date(i.closed_at).toLocaleString(),
+              image: 'pr_closed',
+            });
+            closedItem.parent = parent;
+            parent.children.push(closedItem);
+          }
+        }
 
-      if (Array.isArray(i.assignees) && i.assignees.length > 0) {
-        for (const assignee of i.assignees) {
+        if (i.user && i.user.login) {
+          const authorItem = new IssueItem({
+            title: 'Author:',
+            body: i.user.login,
+            image: 'author',
+          });
+          authorItem.parent = parent;
+          parent.children.push(authorItem);
+        }
+
+        if (Array.isArray(i.assignees) && i.assignees.length > 0) {
+          for (const assignee of i.assignees) {
+            const assigneeItem = new IssueItem({
+              title: 'Assignee:',
+              body: assignee.login,
+              image: 'assignee',
+              tooltip: assignee.name || undefined,
+            });
+            assigneeItem.parent = parent;
+            parent.children.push(assigneeItem);
+          }
+        } else if (i.assignee && i.assignee.login) {
           const assigneeItem = new IssueItem({
             title: 'Assignee:',
-            body: assignee.login,
+            body: i.assignee.login,
             image: 'assignee',
-            tooltip: assignee.name || undefined,
+            tooltip: i.assignee.name || undefined,
           });
           assigneeItem.parent = parent;
           parent.children.push(assigneeItem);
         }
-      } else if (i.assignee && i.assignee.login) {
-        const assigneeItem = new IssueItem({
-          title: 'Assignee:',
-          body: i.assignee.login,
-          image: 'assignee',
-          tooltip: i.assignee.name || undefined,
-        });
-        assigneeItem.parent = parent;
-        parent.children.push(assigneeItem);
-      }
 
-      if (i.milestone && i.milestone.title) {
-        const milestoneItem = new IssueItem({
-          title: 'Milestone:',
-          body: i.milestone.title,
-          tooltip: i.milestone.description || undefined,
-        });
-        milestoneItem.parent = parent;
-        parent.children.push(milestoneItem);
-
-        if (i.milestone.due_on) {
-          const dueDate = new Date(i.milestone.due_on).toLocaleDateString();
-          const dueItem = new IssueItem({
-            title: 'Due:',
-            body: dueDate,
+        if (i.milestone && i.milestone.title) {
+          const milestoneItem = new IssueItem({
+            title: 'Milestone:',
+            body: i.milestone.title,
+            tooltip: i.milestone.description || undefined,
           });
-          dueItem.parent = parent;
-          parent.children.push(dueItem);
+          milestoneItem.parent = parent;
+          parent.children.push(milestoneItem);
+
+          if (i.milestone.due_on) {
+            const dueDate = new Date(i.milestone.due_on).toLocaleDateString();
+            const dueItem = new IssueItem({
+              title: 'Due:',
+              body: dueDate,
+            });
+            dueItem.parent = parent;
+            parent.children.push(dueItem);
+          }
         }
-      }
 
-      if (typeof i.comments === 'number' && i.comments > 0) {
-        const commentsItem = new IssueItem({
-          title: 'Comments:',
-          body: i.comments,
-          image: 'comments',
-        });
-        commentsItem.parent = parent;
-        parent.children.push(commentsItem);
-      }
-
-      if (Array.isArray(i.labels)) {
-        for (const label of i.labels) {
-          const rgb = hexToRgb(label.color);
-          const labelItem = new IssueItem({
-            title: label.name,
-            color: rgb ? Color.rgb(rgb.r, rgb.g, rgb.b) : undefined,
-            tooltip: label.description || undefined,
+        if (typeof i.comments === 'number' && i.comments > 0) {
+          const commentsGroup = new IssueItem({
+            title: 'Comments',
+            body: `(${i.comments})`,
+            image: 'comments',
           });
-          labelItem.parent = parent;
-          parent.children.push(labelItem);
-        }
-      }
+          commentsGroup.parent = parent;
 
-      return parent;
-    });
+          const comments = await fetchCommentsForIssue(i.number);
+          for (const c of comments) {
+            const commentItem = new IssueItem({
+              title: c.user?.login || 'Unknown user',
+              tooltip: c.body,
+              body: new Date(c.created_at).toLocaleString(),
+              image: 'comment',
+            });
+            commentItem.parent = commentsGroup;
+            commentsGroup.children.push(commentItem);
+          }
+
+          parent.children.push(commentsGroup);
+        }
+
+        if (Array.isArray(i.labels)) {
+          for (const label of i.labels) {
+            const rgb = hexToRgb(label.color);
+            const labelItem = new IssueItem({
+              title: label.name,
+              color: rgb ? Color.rgb(rgb.r, rgb.g, rgb.b) : undefined,
+              tooltip: label.description || undefined,
+            });
+            labelItem.parent = parent;
+            parent.children.push(labelItem);
+          }
+        }
+
+        return parent;
+      }),
+    );
     return true;
   }
 
@@ -614,4 +629,25 @@ async function updateIssueState(newState, reason) {
 
     break;
   }
+}
+
+async function fetchCommentsForIssue(issueNumber) {
+  const { token, owner, repo } = loadConfig();
+  const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
+
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+
+  if (!resp.ok) {
+    console.warn(
+      `[Comments] Failed to fetch for issue #${issueNumber}: ${resp.status}`,
+    );
+    return [];
+  }
+
+  return await resp.json();
 }
