@@ -423,7 +423,10 @@ class GitHubIssuesProvider {
         // 6c) Standard children (state, dates, author, assignees, milestone, labels)
         // – show reopen/close reason
         if (i.state_reason === 'reopened') {
-          const reasonItem = new IssueItem({ title: 'Reopened' });
+          const reasonItem = new IssueItem({
+            title: 'Reopened',
+            image: 'issue_reopened',
+          });
           reasonItem.parent = parent;
           parent.children.push(reasonItem);
         } else if (i.state === 'closed' && i.state_reason) {
