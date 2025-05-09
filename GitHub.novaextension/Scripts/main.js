@@ -366,7 +366,7 @@ exports.activate = function () {
       closedPRProvider.refresh().then((c) => c && closedPRView.reload());
   });
 
-  // 6) Auto-refresh every 15 seconds
+  // 6) Auto-refresh every 5 Minutes
   setInterval(
     async () => {
       if (await openProvider.refresh()) openView.reload();
@@ -376,7 +376,7 @@ exports.activate = function () {
 
       console.log('[Auto-refresh] Views updated');
     },
-    10 * 60 * 1000,
+    5 * 60 * 1000,
   ); // 10 minutes
 };
 
