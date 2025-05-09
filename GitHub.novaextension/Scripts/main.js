@@ -778,11 +778,18 @@ async function waitForIssueState(issueNumber, desiredState, maxRetries = 10) {
 
 async function updateIssueState(newState, reason) {
   for (const [section, item] of Object.entries(selectedItems)) {
-    if (!item?.issue) continue;
-    if (item.issue.state === newState) continue;
+    if (!item) continue;
+
+    // walk up until we find an item with a numeric issue.number
+    let root = item;
+    while (root && typeof root.issue?.number !== 'number') {
+      root = root.parent;
+    }
+    if (!root) continue;
+    if (root.issue.state === newState) continue;
 
     const { token, owner, repo } = loadConfig();
-    const issueNumber = item.issue.number;
+    const issueNumber = root.issue.number;
 
     const body = { state: newState };
     if (reason) body.state_reason = reason;
