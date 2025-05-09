@@ -56,14 +56,9 @@ const dataStore = {
 
   async fetchState(type, state, token, owner, repo) {
     const key = `${type}-${state}`;
-    // 1) If we have it in memory, return it immediately
     if (this.cache[key]) return this.cache[key];
-
-    // 1.5) If we’ve already tripped a rate-limit, just fall back to disk
     if (isRateLimited) {
-      console.warn(
-        `[GitHub] Skipping fetchState(${state}) due to previous rate-limit`,
-      );
+      console.warn(`[GitHub] Skipping fetchState(${state}) due to rate-limit`);
       const disk = loadCache(type, state);
       if (disk) {
         this.cache[key] = disk;
@@ -72,64 +67,79 @@ const dataStore = {
       throw new Error(`Rate-limited and no cache for "${state}"`);
     }
 
-    const { itemsPerPage = 30 } = loadConfig();
-    const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=${itemsPerPage}`;
-    const headers = {
-      Authorization: `token ${token}`,
-      Accept: 'application/vnd.github.v3+json',
-    };
-    if (this.etags[key]) {
-      headers['If-None-Match'] = this.etags[key];
-    }
+    const { itemsPerPage = 30, maxRecentItems = 150 } = loadConfig();
+    let page = 1;
+    let allItems = [];
+    let etagUsed = false;
 
     try {
-      // 2) Try the network
-      const resp = await fetch(url, { headers });
-
-      // 🚦 Rate-limit check
-      const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
-      const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
-      if (remaining === 0) {
-        applyRateLimit(resetAt, 'issues');
-
-        // fallback to disk if we have it
-        const disk = loadCache(type, state);
-        if (disk) {
-          this.cache[key] = disk;
-          return disk;
+      while (true) {
+        console.log(
+          `[Fetch] Page ${page} — ${allItems.length}/${maxRecentItems} total so far`,
+        );
+        const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=${itemsPerPage}&page=${page}`;
+        const headers = {
+          Authorization: `token ${token}`,
+          Accept: 'application/vnd.github.v3+json',
+        };
+        if (
+          this.etags[key] &&
+          !etagUsed &&
+          maxRecentItems <= itemsPerPage // only safe when not paginating
+        ) {
+          headers['If-None-Match'] = this.etags[key];
+          etagUsed = true;
         }
-        // otherwise we'll fall through to the error case below
-      }
 
-      if (resp.status === 304) {
-        // Not changed — load from disk (or memory if it was there)
-        const disk = loadCache(type, state);
-        if (disk) {
-          this.cache[key] = disk;
-          return disk;
+        const resp = await fetch(url, { headers });
+
+        const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
+        const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+        if (remaining === 0) {
+          applyRateLimit(resetAt, 'issues');
+          const disk = loadCache(type, state);
+          if (disk) {
+            this.cache[key] = disk;
+            return disk;
+          }
+          break;
         }
-        // if no disk snapshot, fall through to memory or empty
+
+        if (resp.status === 304) {
+          const disk = loadCache(type, state);
+          if (disk) {
+            this.cache[key] = disk;
+            return disk;
+          }
+          break;
+        }
+
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        console.log(
+          `[Fetch] Page Limit ${itemsPerPage}, Max Recent Items ${maxRecentItems}`,
+        );
+        const data = await resp.json();
+        allItems = allItems.concat(data);
+        console.log(`[Fetch] Page ${page}, got ${data.length} items`);
+        if (data.length < itemsPerPage || allItems.length >= maxRecentItems) {
+          break;
+        }
+
+        page++;
       }
 
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
-      }
-
-      // 3) Success: parse, cache in memory & on disk, stash ETag
-      const data = await resp.json();
-      this.etags[key] = resp.headers.get('etag');
-      this.cache[key] = data;
-      saveCache(type, state, data);
-      return data;
+      allItems = allItems.slice(0, maxRecentItems);
+      this.etags[key] = etagUsed ? this.etags[key] : null;
+      this.cache[key] = allItems;
+      saveCache(type, state, allItems);
+      return allItems;
     } catch (err) {
-      // 4) Network failure or rate-limit: fall back to disk
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
       const disk = loadCache(type, state);
       if (disk) {
         this.cache[key] = disk;
         return disk;
       }
-      // no disk to fall back on → rethrow
       throw err;
     }
   },
@@ -288,7 +298,16 @@ function loadConfig() {
     token: nova.config.get('token'),
     owner: nova.config.get('owner'),
     repo: nova.workspace.config.get('repo'),
-    refreshInterval: nova.config.get('refreshInterval') || 10,
+    refreshInterval: nova.config.get('refreshInterval'),
+    maxRecentItems: Math.min(
+      Math.max(
+        isNaN(parseInt(nova.config.get('maxRecentItems'), 10))
+          ? 150
+          : parseInt(nova.config.get('maxRecentItems'), 10),
+        1,
+      ),
+      1000,
+    ),
     itemsPerPage: Math.min(
       Math.max(parseInt(nova.config.get('itemsPerPage') || '30'), 1),
       100,
@@ -333,7 +352,7 @@ exports.activate = function () {
   nova.config.observe('refreshInterval', setupAutoRefresh);
   setupAutoRefresh(); // run once immediately
 
-  nova.config.observe('itemsPerPage', () => {
+  nova.config.observe('maxRecentItems', () => {
     if (
       !openProvider ||
       !closedProvider ||
@@ -347,10 +366,26 @@ exports.activate = function () {
     dataStore.etags.open = null;
     dataStore.etags.closed = null;
 
-    openProvider.refresh(true).then((c) => c && openView.reload());
-    closedProvider.refresh(true).then((c) => c && closedView.reload());
-    openPRProvider.refresh(true).then((c) => c && openPRView.reload());
-    closedPRProvider.refresh(true).then((c) => c && closedPRView.reload());
+    const { token, owner, repo } = loadConfig();
+    Promise.all([
+      dataStore.fetchState('issue', 'open', token, owner, repo),
+      dataStore.fetchState('issue', 'closed', token, owner, repo),
+      dataStore.fetchState('pull', 'open', token, owner, repo),
+      dataStore.fetchState('pull', 'closed', token, owner, repo),
+    ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
+      openProvider
+        .refreshWithData(openIssues)
+        .then((c) => c && openView.reload());
+      closedProvider
+        .refreshWithData(closedIssues)
+        .then((c) => c && closedView.reload());
+      openPRProvider
+        .refreshWithData(openPRs)
+        .then((c) => c && openPRView.reload());
+      closedPRProvider
+        .refreshWithData(closedPRs)
+        .then((c) => c && closedPRView.reload());
+    });
   });
 
   // ensure your extension's global storage folder exists
@@ -772,12 +807,12 @@ class GitHubIssuesProvider {
             : [];
         const allComments = [...comments, ...reviewComments];
 
-        console.log(
+        /*console.log(
           `[Comments] Issue #${i.number}: issueComments=`,
           comments.length,
           'reviewComments=',
           reviewComments.length,
-        );
+        );*/
         if (allComments.length > 0) {
           const group = new IssueItem({
             title: 'Comments',

@@ -40,10 +40,19 @@
       "minimum": 1
     },
     {
+      "key": "maxRecentItems",
+      "type": "text",
+      "title": "Recent Items",
+      "description": "Number of recently updated issues and PRs to display",
+      "required": true,
+      "placeholder": "150",
+      "default": 150
+    },
+    {
       "key": "itemsPerPage",
       "type": "number",
-      "title": "Recent Items",
-      "description": "Number of recently updated issues and PRs to fetch and display (maximum 100)",
+      "title": "Fetch Page Size",
+      "description": "Number of issues or pull requests to request per API call. Larger values reduce request count but increase payload size. Max is 100.",
       "required": true,
       "placeholder": "30",
       "default": 30,
