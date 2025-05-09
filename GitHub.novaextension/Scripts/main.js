@@ -171,16 +171,21 @@ function loadCommentCache(type, number) {
     const { etag, data } = JSON.parse(text);
     return { etag, data };
   } catch {
-    return null;
+    return { etag, data, count: data.length };
   }
 }
 
-async function fetchCommentsForIssue(issueNumber) {
-  if (isRateLimited) return [];
+async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
+  const cache = loadCommentCache('issue', issueNumber);
+  if (isRateLimited) {
+    return cache?.data || [];
+  }
+  if (cache?.count === expectedCount) {
+    return cache.data;
+  }
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
-  const cache = loadCommentCache('issue', issueNumber);
   const headers = {
     Authorization: `token ${token}`,
     Accept: 'application/vnd.github.v3+json',
@@ -208,12 +213,17 @@ async function fetchCommentsForIssue(issueNumber) {
   }
 }
 
-async function fetchReviewComments(pullNumber) {
-  if (isRateLimited) return [];
+async function fetchReviewComments(pullNumber, expectedCount = 0) {
+  const cache = loadCommentCache('pull', pullNumber);
+  if (isRateLimited) {
+    return cache?.data || [];
+  }
+  if (cache?.count === expectedCount) {
+    return cache.data;
+  }
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
-  const cache = loadCommentCache('pull', pullNumber);
   const headers = {
     Authorization: `token ${token}`,
     Accept: 'application/vnd.github.v3+json',
@@ -694,11 +704,13 @@ class GitHubIssuesProvider {
 
         // 6d) Comments & review‐comments
         const comments =
-          i.comments > 0 ? await fetchCommentsForIssue(i.number) : [];
+          i.comments > 0
+            ? await fetchCommentsForIssue(i.number, i.comments)
+            : [];
 
         const reviewComments =
           this.type === 'pull' && i.review_comments > 0
-            ? await fetchReviewComments(i.number)
+            ? await fetchReviewComments(i.number, i.review_comments)
             : [];
         const allComments = [...comments, ...reviewComments];
 
