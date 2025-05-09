@@ -226,8 +226,28 @@ function loadConfig() {
 exports.activate = function () {
   resetRateLimitFlag();
 
-  // pull the user’s chosen interval (or default to 10)
-  const { refreshInterval } = loadConfig();
+  // 6) Auto-refresh every 5 Minutes
+  let refreshTimer = null;
+
+  function setupAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+
+    const { refreshInterval } = loadConfig();
+    refreshTimer = setInterval(
+      async () => {
+        if (await openProvider.refresh()) openView.reload();
+        if (await closedProvider.refresh()) closedView.reload();
+        if (await openPRProvider.refresh()) openPRView.reload();
+        if (await closedPRProvider.refresh()) closedPRView.reload();
+
+        console.log('[Auto-refresh] Views updated');
+      },
+      refreshInterval * 60 * 1000,
+    );
+  }
+
+  nova.config.observe('refreshInterval', setupAutoRefresh);
+  setupAutoRefresh(); // run once immediately
 
   // ensure your extension's global storage folder exists
   try {
@@ -376,19 +396,6 @@ exports.activate = function () {
     if (visible)
       closedPRProvider.refresh().then((c) => c && closedPRView.reload());
   });
-
-  // 6) Auto-refresh every 5 Minutes
-  setInterval(
-    async () => {
-      if (await openProvider.refresh()) openView.reload();
-      if (await closedProvider.refresh()) closedView.reload();
-      if (await openPRProvider.refresh()) openPRView.reload();
-      if (await closedPRProvider.refresh()) closedPRView.reload();
-
-      console.log('[Auto-refresh] Views updated');
-    },
-    refreshInterval * 60 * 1000,
-  ); // 10 minutes
 };
 
 exports.deactivate = function () {

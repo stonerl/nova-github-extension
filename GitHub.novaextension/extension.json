@@ -14,16 +14,17 @@
       "key": "owner",
       "type": "string",
       "title": "Repository Owner",
-      "description": "GitHub username or organization",
+      "description": "GitHub username or organization.",
       "default": "",
-      "placeholder": "e.g. stonerl",
+      "placeholder": "stonerl",
       "required": true
     },
     {
       "key": "token",
       "type": "string",
-      "title": "GitHub Personal Access Token",
-      "description": "Must have `repo` (or `public_repo`) scope",
+      "title": "Personal Access Token",
+      "description": "Must have ‘repo’ (or ‘public_repo’) scope. Click the question mark to generate a token with the correct permissions.",
+      "link": "https://github.com/settings/tokens/new?scopes=repo&description=GitHub%20for%20Nova",
       "default": "",
       "placeholder": "ghp_xxx...",
       "required": true
@@ -32,19 +33,19 @@
       "key": "repo",
       "type": "string",
       "title": "Repository Name",
-      "description": "Name of the GitHub repository",
+      "description": "Name of the GitHub repository (e.g. nova-github-extension, not the URL).",
       "default": "",
-      "placeholder": "e.g. nova-github-extension",
+      "placeholder": "nova-github-extension",
       "required": true
     },
     {
       "key": "refreshInterval",
       "type": "number",
       "title": "Refresh Interval",
-      "description": "How often (in minutes) to automatically refresh issues and PRs",
+      "description": "How often (in minutes) to automatically refresh issues and PRs. Setting this too low may increase the chance of hitting GitHub’s rate limits.",
       "required": true,
-      "placeholder": "10",
-      "default": 10,
+      "placeholder": "30",
+      "default": 30,
       "minimum": 1
     },
     {
