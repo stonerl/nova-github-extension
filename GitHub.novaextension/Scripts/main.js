@@ -139,62 +139,105 @@ const dataStore = {
   },
 };
 
+function commentCachePath(type, number) {
+  const { owner, repo } = loadConfig();
+  const repoDir = `${cacheDir}/${owner}-${repo}`;
+  try {
+    nova.fs.access(repoDir, nova.fs.F_OK);
+  } catch {
+    nova.fs.mkdir(repoDir);
+  }
+  return `${repoDir}/comments-${type}-${number}.json`;
+}
+
+function saveCommentCache(type, number, etag, data) {
+  const path = commentCachePath(type, number);
+  const payload = { etag, data };
+  try {
+    const file = nova.fs.open(path, 'w+t');
+    file.write(JSON.stringify(payload));
+    file.close();
+  } catch (e) {
+    console.warn(`[Cache] Failed to save ${type} #${number} comments:`, e);
+  }
+}
+
+function loadCommentCache(type, number) {
+  const path = commentCachePath(type, number);
+  try {
+    const file = nova.fs.open(path, 'r');
+    const text = file.read();
+    file.close();
+    const { etag, data } = JSON.parse(text);
+    return { etag, data };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCommentsForIssue(issueNumber) {
   if (isRateLimited) return [];
+
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
+  const cache = loadCommentCache('issue', issueNumber);
+  const headers = {
+    Authorization: `token ${token}`,
+    Accept: 'application/vnd.github.v3+json',
+  };
+  if (cache?.etag) headers['If-None-Match'] = cache.etag;
+
   try {
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
+    const resp = await fetch(url, { headers });
     const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
     const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
     if (remaining === 0) {
       applyRateLimit(resetAt, 'comments');
-      return [];
+      return cache?.data || [];
     }
-    if (!resp.ok) {
-      throw new Error(`Comments fetch HTTP ${resp.status}`);
-    }
-    return await resp.json();
+    if (resp.status === 304) return cache?.data || [];
+    if (!resp.ok) throw new Error(`Comments fetch HTTP ${resp.status}`);
+
+    const data = await resp.json();
+    const etag = resp.headers.get('etag');
+    saveCommentCache('issue', issueNumber, etag, data);
+    return data;
   } catch (err) {
-    console.warn(`[Comments] fetch failed for #${issueNumber}:`, err);
-    // optionally: return loadCacheComments(issueNumber);
-    return [];
+    console.warn(`[Comments] Fetch failed for issue #${issueNumber}:`, err);
+    return cache?.data || [];
   }
 }
 
 async function fetchReviewComments(pullNumber) {
   if (isRateLimited) return [];
+
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
-  try {
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
+  const cache = loadCommentCache('pull', pullNumber);
+  const headers = {
+    Authorization: `token ${token}`,
+    Accept: 'application/vnd.github.v3+json',
+  };
+  if (cache?.etag) headers['If-None-Match'] = cache.etag;
 
-    // Rate-limit check
+  try {
+    const resp = await fetch(url, { headers });
     const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
     const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
     if (remaining === 0) {
       applyRateLimit(resetAt, 'comments');
-      return [];
+      return cache?.data || [];
     }
+    if (resp.status === 304) return cache?.data || [];
+    if (!resp.ok) throw new Error(`Review comments fetch HTTP ${resp.status}`);
 
-    if (!resp.ok) {
-      throw new Error(`Review comments fetch HTTP ${resp.status}`);
-    }
-
-    return await resp.json();
+    const data = await resp.json();
+    const etag = resp.headers.get('etag');
+    saveCommentCache('pull', pullNumber, etag, data);
+    return data;
   } catch (err) {
     console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
-    return [];
+    return cache?.data || [];
   }
 }
 
