@@ -59,21 +59,19 @@ exports.activate = function () {
   });
 
   // 3) Initial load
-  openProvider.refresh().then(() => openView.reload());
-  closedProvider.refresh().then(() => closedView.reload());
-  openPRProvider.refresh().then(() => openPRView.reload());
-  closedPRProvider.refresh().then(() => closedPRView.reload());
+  (async () => {
+    if (await openProvider.refresh(true)) openView.reload();
+    if (await closedProvider.refresh(true)) closedView.reload();
+    if (await openPRProvider.refresh(true)) openPRView.reload();
+    if (await closedPRProvider.refresh(true)) closedPRView.reload();
+  })();
 
   // 4) “Refresh” runs both
   nova.commands.register('github-issues.refresh', async () => {
-    await openProvider.refresh();
-    await closedProvider.refresh();
-    await openPRProvider.refresh();
-    await closedPRProvider.refresh();
-    await openView.reload();
-    await closedView.reload();
-    await openPRView.reload();
-    await closedPRView.reload();
+    if (await openProvider.refresh()) openView.reload();
+    if (await closedProvider.refresh()) closedView.reload();
+    if (await openPRProvider.refresh()) openPRView.reload();
+    if (await closedPRProvider.refresh()) closedPRView.reload();
   });
 
   nova.commands.register('github-issues.newIssue', () => {
@@ -143,72 +141,31 @@ exports.activate = function () {
   });
 
   nova.commands.register('github-issues.reopenIssue', async () => {
-    for (const [section, item] of Object.entries(selectedItems)) {
-      if (!item?.issue || item.issue.state !== 'closed') continue;
-
-      const { token, owner, repo } = loadConfig();
-      const issueNumber = item.issue.number;
-
-      const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
-      const body = JSON.stringify({ state: 'open' });
-
-      const resp = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `token ${token}`,
-          Accept: 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json',
-        },
-        body,
-      });
-
-      if (resp.ok) {
-        console.log(`[Reopen] Issue #${issueNumber} reopened`);
-        // Reload the appropriate view
-        const view = {
-          'closed-issues': closedView,
-          'closed-pulls': closedPRView,
-        }[section];
-        const provider = {
-          'closed-issues': closedProvider,
-          'closed-pulls': closedPRProvider,
-        }[section];
-
-        if (provider && view) {
-          await provider.refresh();
-          view.reload();
-        }
-      } else {
-        console.error(
-          `[Reopen] Failed to reopen issue #${issueNumber}`,
-          await resp.text(),
-        );
-      }
-
-      break;
-    }
+    await updateIssueState('open');
   });
 
   // 5) When switching back to either view, re-fetch
   openView.onDidChangeVisibility((visible) => {
-    if (visible) openProvider.refresh().then(() => openView.reload());
+    if (visible) openProvider.refresh().then((c) => c && openView.reload());
   });
   closedView.onDidChangeVisibility((visible) => {
-    if (visible) closedProvider.refresh().then(() => closedView.reload());
+    if (visible) closedProvider.refresh().then((c) => c && closedView.reload());
+  });
+  openPRView.onDidChangeVisibility((visible) => {
+    if (visible) openPRProvider.refresh().then((c) => c && openPRView.reload());
+  });
+  closedPRView.onDidChangeVisibility((visible) => {
+    if (visible)
+      closedPRProvider.refresh().then((c) => c && closedPRView.reload());
   });
 
   // 6) Auto-refresh every 15 seconds
   setInterval(
     async () => {
-      await openProvider.refresh();
-      await closedProvider.refresh();
-      await openPRProvider.refresh();
-      await closedPRProvider.refresh();
-
-      openView.reload();
-      closedView.reload();
-      openPRView.reload();
-      closedPRView.reload();
+      if (await openProvider.refresh()) openView.reload();
+      if (await closedProvider.refresh()) closedView.reload();
+      if (await openPRProvider.refresh()) openPRView.reload();
+      if (await closedPRProvider.refresh()) closedPRView.reload();
 
       console.log('[Auto-refresh] Views updated');
     },
@@ -246,6 +203,8 @@ class GitHubIssuesProvider {
     this.type = type; // 'issue' or 'pull'
     this.rootItems = [];
     this.itemsById = new Map();
+    this.lastItemIds = new Set();
+    this.initialized = false;
 
     // re-fetch if config changes
     nova.config.observe('token', () => this.refresh());
@@ -253,12 +212,12 @@ class GitHubIssuesProvider {
     nova.config.observe('repo', () => this.refresh());
   }
 
-  async refresh() {
-    this.itemsById.clear();
+  async refresh(force = false) {
     const { token, owner, repo } = loadConfig();
     if (!token || !owner || !repo) {
       this.rootItems = [];
-      return;
+      this.lastItemIds = new Set();
+      return false;
     }
 
     const url =
@@ -277,6 +236,23 @@ class GitHubIssuesProvider {
     const data = await resp.json();
     const issues =
       this.type === 'issue' ? data.filter((i) => !i.pull_request) : data;
+
+    const hasChanged =
+      force ||
+      !this.initialized ||
+      issues.length !== this.rootItems.length ||
+      issues.some((i) => {
+        const prev = this.itemsById.get(String(i.id));
+        return !prev || prev.issue.updated_at !== i.updated_at;
+      });
+
+    if (!hasChanged) {
+      console.log(`[${this.type}-${this.state}] No updates; skipping`);
+      return false;
+    }
+
+    this.initialized = true;
+    this.itemsById.clear();
 
     this.rootItems = issues.map((i) => {
       const parent = new IssueItem(i);
@@ -488,6 +464,7 @@ class GitHubIssuesProvider {
 
       return parent;
     });
+    return true;
   }
 
   // ─── TreeDataProvider methods ────────────────────────────
@@ -551,9 +528,45 @@ class GitHubIssuesProvider {
   }
 }
 
+async function waitForIssueState(issueNumber, desiredState, maxRetries = 10) {
+  const { token, owner, repo } = loadConfig();
+  const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
+  for (let i = 0; i < maxRetries; i++) {
+    console.log(
+      `[Wait] Checking state for issue #${issueNumber} (try ${i + 1}/${maxRetries})...`,
+    );
+    const resp = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+    if (!resp.ok) {
+      console.warn(`[Wait] GitHub API returned ${resp.status}; stopping early`);
+      break;
+    }
+
+    const issue = await resp.json();
+    if (issue.state === desiredState) {
+      console.log(
+        `[Wait] Issue #${issueNumber} is now in state "${desiredState}"`,
+      );
+      return true;
+    }
+
+    await new Promise((r) => setTimeout(r, 1000)); // wait 1s
+  }
+
+  console.warn(
+    `[Wait] Gave up waiting for issue #${issueNumber} to reach state "${desiredState}"`,
+  );
+  return false;
+}
+
 async function updateIssueState(newState, reason) {
   for (const [section, item] of Object.entries(selectedItems)) {
-    if (!item?.issue || item.issue.state !== 'open') continue;
+    if (!item?.issue) continue;
+    if (item.issue.state === newState) continue;
 
     const { token, owner, repo } = loadConfig();
     const issueNumber = item.issue.number;
@@ -579,20 +592,18 @@ async function updateIssueState(newState, reason) {
         `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ''}`,
       );
       // Refresh
-      if (section === 'issues') {
-        setTimeout(async () => {
-          await openProvider.refresh();
-          await closedProvider.refresh();
+      if (await waitForIssueState(issueNumber, newState)) {
+        if (section === 'issues' || section === 'closed-issues') {
+          await openProvider.refresh(true);
           openView.reload();
+          await closedProvider.refresh(true);
           closedView.reload();
-        }, 5000);
-      } else if (section === 'pulls') {
-        setTimeout(async () => {
-          await openPRProvider.refresh();
-          await closedPRProvider.refresh();
+        } else if (section === 'pulls' || section === 'closed-pulls') {
+          await openPRProvider.refresh(true);
           openPRView.reload();
+          await closedPRProvider.refresh(true);
           closedPRView.reload();
-        }, 5000);
+        }
       }
     } else {
       console.error(
