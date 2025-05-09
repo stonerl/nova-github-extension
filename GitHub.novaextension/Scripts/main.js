@@ -76,7 +76,8 @@ const dataStore = {
       throw new Error(`Rate-limited and no cache for "${state}"`);
     }
 
-    const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=100`;
+    const { itemsPerPage = 30 } = loadConfig();
+    const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=${itemsPerPage}`;
     const headers = {
       Authorization: `token ${token}`,
       Accept: 'application/vnd.github.v3+json',
@@ -210,14 +211,24 @@ let selectedItems = {
 };
 
 function loadConfig() {
-  const token = nova.config.get('token');
-  const owner = nova.config.get('owner');
-  const repo = nova.config.get('repo');
-  return { token, owner, repo };
+  return {
+    token: nova.config.get('token'),
+    owner: nova.config.get('owner'),
+    repo: nova.config.get('repo'),
+    refreshInterval: nova.config.get('refreshInterval') || 10,
+    itemsPerPage: Math.min(
+      Math.max(parseInt(nova.config.get('itemsPerPage') || '30'), 1),
+      100,
+    ),
+  };
 }
 
 exports.activate = function () {
   resetRateLimitFlag();
+
+  // pull the user’s chosen interval (or default to 10)
+  const { refreshInterval } = loadConfig();
+
   // ensure your extension's global storage folder exists
   try {
     nova.fs.access(cacheDir, nova.fs.F_OK);
@@ -376,7 +387,7 @@ exports.activate = function () {
 
       console.log('[Auto-refresh] Views updated');
     },
-    5 * 60 * 1000,
+    refreshInterval * 60 * 1000,
   ); // 10 minutes
 };
 

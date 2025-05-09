@@ -11,25 +11,52 @@
 
   "config": [
     {
-      "key": "token",
-      "type": "string",
-      "title": "GitHub Personal Access Token",
-      "description": "Must have `repo` (or `public_repo`) scope",
-      "default": ""
-    },
-    {
       "key": "owner",
       "type": "string",
       "title": "Repository Owner",
       "description": "GitHub username or organization",
-      "default": ""
+      "default": "",
+      "placeholder": "e.g. stonerl",
+      "required": true
+    },
+    {
+      "key": "token",
+      "type": "string",
+      "title": "GitHub Personal Access Token",
+      "description": "Must have `repo` (or `public_repo`) scope",
+      "default": "",
+      "placeholder": "ghp_xxx...",
+      "required": true
     },
     {
       "key": "repo",
       "type": "string",
       "title": "Repository Name",
       "description": "Name of the GitHub repository",
-      "default": ""
+      "default": "",
+      "placeholder": "e.g. nova-github-extension",
+      "required": true
+    },
+    {
+      "key": "refreshInterval",
+      "type": "number",
+      "title": "Refresh Interval",
+      "description": "How often (in minutes) to automatically refresh issues and PRs",
+      "required": true,
+      "placeholder": "10",
+      "default": 10,
+      "minimum": 1
+    },
+    {
+      "key": "itemsPerPage",
+      "type": "number",
+      "title": "Recent Items",
+      "description": "Number of the most recently updated issues and PRs to fetch (up to 100)",
+      "required": true,
+      "placeholder": "30",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 100
     }
   ],
 
