@@ -71,6 +71,7 @@ const dataStore = {
     let page = 1;
     let allItems = [];
     let etagUsed = false;
+    let resp;
 
     try {
       while (true) {
@@ -91,7 +92,7 @@ const dataStore = {
           etagUsed = true;
         }
 
-        const resp = await fetch(url, { headers });
+        resp = await fetch(url, { headers });
 
         const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
         const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
