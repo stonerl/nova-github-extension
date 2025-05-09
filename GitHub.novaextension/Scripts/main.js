@@ -144,6 +144,17 @@ exports.activate = function () {
     await updateIssueState('open');
   });
 
+  nova.commands.register('github-issues.openCommentInBrowser', () => {
+    for (const item of Object.values(selectedItems)) {
+      if (item?.issue?.url) {
+        nova.openURL(item.issue.url);
+        return;
+      }
+    }
+
+    console.warn('[Command] No comment with URL selected.');
+  });
+
   // 5) When switching back to either view, re-fetch
   openView.onDidChangeVisibility((visible) => {
     if (visible) openProvider.refresh().then((c) => c && openView.reload());
@@ -455,7 +466,9 @@ class GitHubIssuesProvider {
               tooltip: c.body,
               body: new Date(c.created_at).toLocaleString(),
               image: 'comment',
+              url: c.html_url,
             });
+            commentItem.contextValue = 'comment';
             commentItem.parent = commentsGroup;
             commentsGroup.children.push(commentItem);
           }
@@ -529,11 +542,13 @@ class GitHubIssuesProvider {
       }
     } else {
       item.name = issue.title;
-      item.selectable = false;
       if (issue.image) item.image = issue.image;
       if (issue.body) item.descriptiveText = issue.body;
       if (issue.tooltip) item.tooltip = issue.tooltip;
       if (issue.color) item.color = issue.color;
+      if (element.contextValue) {
+        item.contextValue = element.contextValue;
+      }
     }
     return item;
   }

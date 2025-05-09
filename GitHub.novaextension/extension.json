@@ -126,6 +126,11 @@
               "title": "Reopen Issue",
               "command": "github-issues.reopenIssue",
               "when": "viewItem == 'issue-root'"
+            },
+            {
+              "title": "Open Comment on GitHub",
+              "command": "github-issues.openCommentInBrowser",
+              "when": "viewItem == 'comment'"
             }
           ]
         },
