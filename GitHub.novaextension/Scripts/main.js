@@ -292,6 +292,26 @@ exports.activate = function () {
   nova.config.observe('refreshInterval', setupAutoRefresh);
   setupAutoRefresh(); // run once immediately
 
+  nova.config.observe('itemsPerPage', () => {
+    if (
+      !openProvider ||
+      !closedProvider ||
+      !openPRProvider ||
+      !closedPRProvider
+    )
+      return;
+
+    dataStore.cache.open = null;
+    dataStore.cache.closed = null;
+    dataStore.etags.open = null;
+    dataStore.etags.closed = null;
+
+    openProvider.refresh(true).then((c) => c && openView.reload());
+    closedProvider.refresh(true).then((c) => c && closedView.reload());
+    openPRProvider.refresh(true).then((c) => c && openPRView.reload());
+    closedPRProvider.refresh(true).then((c) => c && closedPRView.reload());
+  });
+
   // ensure your extension's global storage folder exists
   try {
     nova.fs.access(cacheDir, nova.fs.F_OK);
