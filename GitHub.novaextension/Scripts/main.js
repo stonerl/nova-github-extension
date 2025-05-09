@@ -1,4 +1,19 @@
 // main.js
+let isRateLimited = false;
+
+function resetRateLimitFlag() {
+  isRateLimited = false;
+}
+
+function applyRateLimit(resetAt, label) {
+  console.warn(
+    `[GitHub] ${label} rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
+  );
+  isRateLimited = true;
+  const ms = resetAt * 1000 - Date.now();
+  setTimeout(resetRateLimitFlag, Math.max(ms, 0));
+}
+
 const cacheDir = nova.extension.globalStoragePath;
 
 function cachePath(state) {
@@ -48,6 +63,19 @@ const dataStore = {
       return this.cache[state];
     }
 
+    // 1.5) If we’ve already tripped a rate-limit, just fall back to disk
+    if (isRateLimited) {
+      console.warn(
+        `[GitHub] Skipping fetchState(${state}) due to previous rate-limit`,
+      );
+      const disk = loadCache(state);
+      if (disk) {
+        this.cache[state] = disk;
+        return disk;
+      }
+      throw new Error(`Rate-limited and no cache for "${state}"`);
+    }
+
     const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=100`;
     const headers = {
       Authorization: `token ${token}`,
@@ -65,10 +93,8 @@ const dataStore = {
       const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
       const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
       if (remaining === 0) {
-        // log exactly the warning you used to see
-        console.warn(
-          `[GitHub] Rate-limit hit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
-        );
+        applyRateLimit(resetAt, 'issues');
+
         // fallback to disk if we have it
         const disk = loadCache(state);
         if (disk) {
@@ -113,6 +139,7 @@ const dataStore = {
 };
 
 async function fetchCommentsForIssue(issueNumber) {
+  if (isRateLimited) return [];
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
   try {
@@ -125,10 +152,7 @@ async function fetchCommentsForIssue(issueNumber) {
     const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
     const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
     if (remaining === 0) {
-      console.warn(
-        `[GitHub] Comments rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
-      );
-      // optionally: return loadCacheComments(issueNumber) if you have one
+      applyRateLimit(resetAt, 'comments');
       return [];
     }
     if (!resp.ok) {
@@ -143,6 +167,7 @@ async function fetchCommentsForIssue(issueNumber) {
 }
 
 async function fetchReviewComments(pullNumber) {
+  if (isRateLimited) return [];
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
   try {
@@ -157,9 +182,7 @@ async function fetchReviewComments(pullNumber) {
     const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
     const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
     if (remaining === 0) {
-      console.warn(
-        `[GitHub] Review-comments rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
-      );
+      applyRateLimit(resetAt, 'comments');
       return [];
     }
 
@@ -194,6 +217,7 @@ function loadConfig() {
 }
 
 exports.activate = function () {
+  resetRateLimitFlag();
   // ensure your extension's global storage folder exists
   try {
     nova.fs.access(cacheDir, nova.fs.F_OK);
