@@ -308,10 +308,21 @@ exports.activate = function () {
     const { refreshInterval } = loadConfig();
     refreshTimer = setInterval(
       async () => {
-        if (await openProvider.refresh()) openView.reload();
-        if (await closedProvider.refresh()) closedView.reload();
-        if (await openPRProvider.refresh()) openPRView.reload();
-        if (await closedPRProvider.refresh()) closedPRView.reload();
+        const { token, owner, repo } = loadConfig();
+        const [openIssues, closedIssues, openPRs, closedPRs] =
+          await Promise.all([
+            dataStore.fetchState('issue', 'open', token, owner, repo),
+            dataStore.fetchState('issue', 'closed', token, owner, repo),
+            dataStore.fetchState('pull', 'open', token, owner, repo),
+            dataStore.fetchState('pull', 'closed', token, owner, repo),
+          ]);
+
+        if (await openProvider.refreshWithData(openIssues)) openView.reload();
+        if (await closedProvider.refreshWithData(closedIssues))
+          closedView.reload();
+        if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
+        if (await closedPRProvider.refreshWithData(closedPRs))
+          closedPRView.reload();
 
         console.log('[Auto-refresh] Views updated');
       },
@@ -389,18 +400,36 @@ exports.activate = function () {
 
   // 3) Initial load
   (async () => {
-    if (await openProvider.refresh(true)) openView.reload();
-    if (await closedProvider.refresh(true)) closedView.reload();
-    if (await openPRProvider.refresh(true)) openPRView.reload();
-    if (await closedPRProvider.refresh(true)) closedPRView.reload();
+    const { token, owner, repo } = loadConfig();
+    const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
+      dataStore.fetchState('issue', 'open', token, owner, repo),
+      dataStore.fetchState('issue', 'closed', token, owner, repo),
+      dataStore.fetchState('pull', 'open', token, owner, repo),
+      dataStore.fetchState('pull', 'closed', token, owner, repo),
+    ]);
+
+    if (await openProvider.refreshWithData(openIssues)) openView.reload();
+    if (await closedProvider.refreshWithData(closedIssues)) closedView.reload();
+    if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
+    if (await closedPRProvider.refreshWithData(closedPRs))
+      closedPRView.reload();
   })();
 
   // 4) “Refresh” runs both
   nova.commands.register('github-issues.refresh', async () => {
-    if (await openProvider.refresh()) openView.reload();
-    if (await closedProvider.refresh()) closedView.reload();
-    if (await openPRProvider.refresh()) openPRView.reload();
-    if (await closedPRProvider.refresh()) closedPRView.reload();
+    const { token, owner, repo } = loadConfig();
+    const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
+      dataStore.fetchState('issue', 'open', token, owner, repo),
+      dataStore.fetchState('issue', 'closed', token, owner, repo),
+      dataStore.fetchState('pull', 'open', token, owner, repo),
+      dataStore.fetchState('pull', 'closed', token, owner, repo),
+    ]);
+
+    if (await openProvider.refreshWithData(openIssues)) openView.reload();
+    if (await closedProvider.refreshWithData(closedIssues)) closedView.reload();
+    if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
+    if (await closedPRProvider.refreshWithData(closedPRs))
+      closedPRView.reload();
   });
 
   nova.commands.register('github-issues.newIssue', () => {
@@ -477,17 +506,16 @@ exports.activate = function () {
 
   // 5) When switching back to either view, re-fetch
   openView.onDidChangeVisibility((visible) => {
-    if (visible) openProvider.refresh().then((c) => c && openView.reload());
+    if (visible) openView.reload();
   });
   closedView.onDidChangeVisibility((visible) => {
-    if (visible) closedProvider.refresh().then((c) => c && closedView.reload());
+    if (visible) closedView.reload();
   });
   openPRView.onDidChangeVisibility((visible) => {
-    if (visible) openPRProvider.refresh().then((c) => c && openPRView.reload());
+    if (visible) openPRView.reload();
   });
   closedPRView.onDidChangeVisibility((visible) => {
-    if (visible)
-      closedPRProvider.refresh().then((c) => c && closedPRView.reload());
+    if (visible) closedPRView.reload();
   });
 };
 
@@ -525,12 +553,16 @@ class GitHubIssuesProvider {
     this.initialized = false;
 
     // re-fetch if config changes
-    nova.config.observe('token', () => this.refresh());
-    nova.config.observe('owner', () => this.refresh());
-    nova.config.observe('repo', () => this.refresh());
+    nova.config.observe('token', () => this._refreshInternal(true));
+    nova.config.observe('owner', () => this._refreshInternal(true));
+    nova.config.observe('repo', () => this._refreshInternal(true));
   }
 
-  async refresh(force = false) {
+  async refreshWithData(data) {
+    return this._refreshInternal(data, true);
+  }
+
+  async _refreshInternal(force = false) {
     const { token, owner, repo } = loadConfig();
     const headers = {
       Authorization: `token ${token}`,
