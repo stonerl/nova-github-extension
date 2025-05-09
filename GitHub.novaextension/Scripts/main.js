@@ -145,14 +145,33 @@ async function fetchCommentsForIssue(issueNumber) {
 async function fetchReviewComments(pullNumber) {
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
-  const resp = await fetch(url, {
-    headers: {
-      Authorization: `token ${token}`,
-      Accept: 'application/vnd.github.v3+json',
-    },
-  });
-  if (!resp.ok) return [];
-  return await resp.json();
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+
+    // Rate-limit check
+    const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
+    const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+    if (remaining === 0) {
+      console.warn(
+        `[GitHub] Review-comments rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
+      );
+      return [];
+    }
+
+    if (!resp.ok) {
+      throw new Error(`Review comments fetch HTTP ${resp.status}`);
+    }
+
+    return await resp.json();
+  } catch (err) {
+    console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
+    return [];
+  }
 }
 
 let openView, closedView;
