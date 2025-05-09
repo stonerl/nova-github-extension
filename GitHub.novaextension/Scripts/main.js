@@ -97,19 +97,21 @@ exports.activate = function () {
   });
 
   nova.commands.register('github-issues.openInBrowser', () => {
-    for (const [section, item] of Object.entries(selectedItems)) {
-      console.log(`[Command] Section "${section}" selected item:`, item);
+    for (const item of Object.values(selectedItems)) {
+      const url =
+        item?.html_url ||
+        item?.url ||
+        item?.issue?.html_url ||
+        item?.issue?.url;
 
-      if (item?.issue?.html_url) {
-        console.log('[Command] Opening URL:', item.issue.html_url);
-        nova.openURL(item.issue.html_url);
+      if (url) {
+        console.log('[Command] Opening URL:', url);
+        nova.openURL(url);
         return;
       }
     }
 
-    console.warn(
-      '[Command] No selected node with valid issue URL in any view.',
-    );
+    console.warn('[Command] No valid issue or comment URL selected.');
   });
 
   nova.commands.register('github-issues.copyUrl', () => {
@@ -142,17 +144,6 @@ exports.activate = function () {
 
   nova.commands.register('github-issues.reopenIssue', async () => {
     await updateIssueState('open');
-  });
-
-  nova.commands.register('github-issues.openCommentInBrowser', () => {
-    for (const item of Object.values(selectedItems)) {
-      if (item?.issue?.url) {
-        nova.openURL(item.issue.url);
-        return;
-      }
-    }
-
-    console.warn('[Command] No comment with URL selected.');
   });
 
   // 5) When switching back to either view, re-fetch

@@ -74,7 +74,7 @@
             {
               "title": "Open on GitHub",
               "command": "github-issues.openInBrowser",
-              "when": "viewItem == 'issue-root'"
+              "when": "viewItem == 'issue-root' || viewItem == 'comment'"
             },
             {
               "title": "Copy GitHub URL",
@@ -109,7 +109,7 @@
             {
               "title": "Open on GitHub",
               "command": "github-issues.openInBrowser",
-              "when": "viewItem == 'issue-root'"
+              "when": "viewItem == 'issue-root' || viewItem == 'comment'"
             },
             {
               "title": "Copy GitHub URL",
@@ -121,11 +121,6 @@
               "title": "Reopen Issue",
               "command": "github-issues.reopenIssue",
               "when": "viewItem == 'issue-root'"
-            },
-            {
-              "title": "Open Comment on GitHub",
-              "command": "github-issues.openCommentInBrowser",
-              "when": "viewItem == 'comment'"
             }
           ]
         },
@@ -147,7 +142,7 @@
             {
               "title": "Open on GitHub",
               "command": "github-issues.openInBrowser",
-              "when": "viewItem == 'issue-root'"
+              "when": "viewItem == 'issue-root' || viewItem == 'comment'"
             },
             {
               "title": "Copy GitHub URL",
@@ -166,7 +161,7 @@
             {
               "title": "Open on GitHub",
               "command": "github-issues.openInBrowser",
-              "when": "viewItem == 'issue-root'"
+              "when": "viewItem == 'issue-root' || viewItem == 'comment'"
             },
             {
               "title": "Copy GitHub URL",
