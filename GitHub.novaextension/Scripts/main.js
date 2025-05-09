@@ -230,20 +230,20 @@ async function fetchReviewComments(pullNumber, expectedCount = 0) {
 
   if (isRateLimited) {
     console.log(
-      `[Comments] Issue #${issueNumber}: rate-limited, using cached comments (${cache?.data?.length || 0})`,
+      `[Comments] Issue #${pullNumber}: rate-limited, using cached comments (${cache?.data?.length || 0})`,
     );
     return cache?.data || [];
   }
 
   if (cache?.count === expectedCount) {
     console.log(
-      `[Comments] Issue #${issueNumber}: using cached comments (expected ${expectedCount}, got ${cache.data.length})`,
+      `[Comments] Issue #${pullNumber}: using cached comments (expected ${expectedCount}, got ${cache.data.length})`,
     );
     return cache.data;
   }
 
   console.log(
-    `[Comments] Issue #${issueNumber}: expected ${expectedCount}, cache has ${cache?.count ?? 'none'} → fetching from API`,
+    `[Comments] Issue #${pullNumber}: expected ${expectedCount}, cache has ${cache?.count ?? 'none'} → fetching from API`,
   );
 
   const { token, owner, repo } = loadConfig();
