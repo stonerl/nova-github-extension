@@ -28,6 +28,48 @@ async function fetchReviewComments(pullNumber) {
   return await resp.json();
 }
 
+const cacheDir = nova.extension.globalStoragePath;
+
+function cacheDirFor(state, type) {
+  const { owner, repo } = loadConfig();
+  // or: const ws = nova.workspace.path.split('/').pop();
+  return `${cacheDir}/${owner}-${repo}`;
+}
+
+function cachePath(state, type) {
+  const dir = cacheDirFor(state, type);
+  try {
+    nova.fs.mkdir(dir);
+  } catch {} // ensure subfolder
+  return `${dir}/issues-${state}-${type}.json`;
+}
+
+function saveCache(state, type, rawData) {
+  const path = cachePath(state, type);
+  try {
+    // Open for writing (text mode, truncate)
+    const file = nova.fs.open(path, 'w+');
+    file.write(JSON.stringify(rawData));
+    file.close();
+  } catch (e) {
+    console.warn('[Cache] write failed:', e);
+  }
+}
+
+function loadCache(state, type) {
+  const path = cachePath(state, type);
+  try {
+    // Open for reading
+    const file = nova.fs.open(path, 'r');
+    const text = file.read();
+    file.close();
+    return JSON.parse(text);
+  } catch (e) {
+    // missing or malformed cache
+    return null;
+  }
+}
+
 let openView, closedView;
 let openProvider, closedProvider;
 let openPRView, closedPRView;
@@ -48,6 +90,12 @@ function loadConfig() {
 }
 
 exports.activate = function () {
+  try {
+    nova.fs.mkdir(cacheDir);
+  } catch (e) {
+    console.warn('[Cache] could not create cache directory', e);
+  }
+
   // Instantiate providers
   openProvider = new GitHubIssuesProvider('open', 'issue');
   closedProvider = new GitHubIssuesProvider('closed', 'issue');
@@ -258,33 +306,38 @@ class GitHubIssuesProvider {
     };
     if (etagCache.has(url)) headers['If-None-Match'] = etagCache.get(url);
 
-    const resp = await fetch(url, { headers });
+    let data;
+    try {
+      const resp = await fetch(url, { headers });
 
-    // 2) Handle 304 / rate-limit
-    if (resp.status === 304) {
-      console.log(`[GitHub] No changes for ${this.type}-${this.state}`);
-      return false;
-    }
-    const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
-    const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
-    if (remaining === 0) {
-      console.warn(
-        `[GitHub] Rate-limit hit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
-      );
-      return false;
-    }
-    if (!resp.ok) {
-      const body = await resp.text();
-      console.error(`[GitHub ${url}] HTTP ${resp.status}: ${body}`);
-      throw new Error(`GitHub API HTTP ${resp.status}`);
-    }
+      if (resp.status === 304) {
+        console.log(`[GitHub] No changes for ${this.type}-${this.state}`);
+        return false;
+      }
+      const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
+      const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+      if (remaining === 0) {
+        console.warn(
+          `[GitHub] Rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
+        );
+        return false;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-    // 3) Cache new ETag
-    const newEtag = resp.headers.get('etag');
-    if (newEtag) etagCache.set(url, newEtag);
+      // grab & cache
+      data = await resp.json();
+      saveCache(this.state, this.type, data);
+      // update ETag cache
+      const newEtag = resp.headers.get('etag');
+      if (newEtag) etagCache.set(url, newEtag);
+    } catch (err) {
+      console.warn('[GitHub] fetch failed, loading cache:', err);
+      const fromDisk = loadCache(this.state, this.type);
+      if (!fromDisk) throw err;
+      data = fromDisk;
+    }
 
     // 4) Parse & filter
-    const data = await resp.json();
     const issues =
       this.type === 'issue'
         ? data.filter((i) => !i.pull_request)
