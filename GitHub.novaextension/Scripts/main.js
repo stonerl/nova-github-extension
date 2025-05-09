@@ -16,22 +16,19 @@ function applyRateLimit(resetAt, label) {
 
 const cacheDir = nova.extension.globalStoragePath;
 
-function cachePath(state) {
+function cachePath(type, state) {
   const { owner, repo } = loadConfig();
-  // build a per-repo subfolder under cacheDir
   const repoDir = `${cacheDir}/${owner}-${repo}`;
   try {
-    // if it doesn’t throw, it already exists
     nova.fs.access(repoDir, nova.fs.F_OK);
   } catch {
-    // only try to create if access() failed
     nova.fs.mkdir(repoDir);
   }
-  return `${repoDir}/issues-${state}.json`;
+  return `${repoDir}/${type}-${state}.json`; // e.g. pull-open.json
 }
 
-function saveCache(state, data) {
-  const path = cachePath(state);
+function saveCache(type, state, data) {
+  const path = cachePath(type, state);
   try {
     const file = nova.fs.open(path, 'w+t');
     file.write(JSON.stringify(data));
@@ -41,8 +38,8 @@ function saveCache(state, data) {
   }
 }
 
-function loadCache(state) {
-  const path = cachePath(state);
+function loadCache(type, state) {
+  const path = cachePath(type, state);
   try {
     const file = nova.fs.open(path, 'r');
     const text = file.read();
@@ -54,23 +51,22 @@ function loadCache(state) {
 }
 
 const dataStore = {
-  cache: { open: null, closed: null },
-  etags: { open: null, closed: null },
+  cache: {},
+  etags: {},
 
-  async fetchState(state, token, owner, repo) {
+  async fetchState(type, state, token, owner, repo) {
+    const key = `${type}-${state}`;
     // 1) If we have it in memory, return it immediately
-    if (this.cache[state]) {
-      return this.cache[state];
-    }
+    if (this.cache[key]) return this.cache[key];
 
     // 1.5) If we’ve already tripped a rate-limit, just fall back to disk
     if (isRateLimited) {
       console.warn(
         `[GitHub] Skipping fetchState(${state}) due to previous rate-limit`,
       );
-      const disk = loadCache(state);
+      const disk = loadCache(type, state);
       if (disk) {
-        this.cache[state] = disk;
+        this.cache[key] = disk;
         return disk;
       }
       throw new Error(`Rate-limited and no cache for "${state}"`);
@@ -82,8 +78,8 @@ const dataStore = {
       Authorization: `token ${token}`,
       Accept: 'application/vnd.github.v3+json',
     };
-    if (this.etags[state]) {
-      headers['If-None-Match'] = this.etags[state];
+    if (this.etags[key]) {
+      headers['If-None-Match'] = this.etags[key];
     }
 
     try {
@@ -97,9 +93,9 @@ const dataStore = {
         applyRateLimit(resetAt, 'issues');
 
         // fallback to disk if we have it
-        const disk = loadCache(state);
+        const disk = loadCache(type, state);
         if (disk) {
-          this.cache[state] = disk;
+          this.cache[key] = disk;
           return disk;
         }
         // otherwise we'll fall through to the error case below
@@ -107,9 +103,9 @@ const dataStore = {
 
       if (resp.status === 304) {
         // Not changed — load from disk (or memory if it was there)
-        const disk = loadCache(state);
+        const disk = loadCache(type, state);
         if (disk) {
-          this.cache[state] = disk;
+          this.cache[key] = disk;
           return disk;
         }
         // if no disk snapshot, fall through to memory or empty
@@ -121,16 +117,16 @@ const dataStore = {
 
       // 3) Success: parse, cache in memory & on disk, stash ETag
       const data = await resp.json();
-      this.etags[state] = resp.headers.get('etag');
-      this.cache[state] = data;
-      saveCache(state, data);
+      this.etags[key] = resp.headers.get('etag');
+      this.cache[key] = data;
+      saveCache(type, state, data);
       return data;
     } catch (err) {
       // 4) Network failure or rate-limit: fall back to disk
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
-      const disk = loadCache(state);
+      const disk = loadCache(type, state);
       if (disk) {
-        this.cache[state] = disk;
+        this.cache[key] = disk;
         return disk;
       }
       // no disk to fall back on → rethrow
@@ -543,7 +539,13 @@ class GitHubIssuesProvider {
 
     let data;
     try {
-      data = await dataStore.fetchState(this.state, token, owner, repo);
+      data = await dataStore.fetchState(
+        this.type,
+        this.state,
+        token,
+        owner,
+        repo,
+      );
     } catch (err) {
       console.error(`[${this.type}-${this.state}] cannot load data:`, err);
       return false;
@@ -738,12 +740,12 @@ class GitHubIssuesProvider {
             : [];
         const allComments = [...comments, ...reviewComments];
 
-        /*console.log(
+        console.log(
           `[Comments] Issue #${i.number}: issueComments=`,
           comments.length,
           'reviewComments=',
           reviewComments.length,
-        );*/
+        );
         if (allComments.length > 0) {
           const group = new IssueItem({
             title: 'Comments',
