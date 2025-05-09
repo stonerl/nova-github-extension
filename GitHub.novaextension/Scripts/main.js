@@ -527,14 +527,22 @@ class GitHubIssuesProvider {
 
         // – closed / merged for issues & PRs
         if (this.type === 'issue' && isClosed) {
+          // use pr_closed for “not_planned” or “duplicate”, otherwise fall back
+          const closedImage = ['not_planned', 'duplicate'].includes(
+            i.state_reason,
+          )
+            ? 'pr_closed'
+            : 'issue_closed';
+
           const closedAt = new IssueItem({
             title: 'Closed',
             body: new Date(i.closed_at).toLocaleString(),
-            image: 'issue_closed',
+            image: closedImage,
           });
           closedAt.parent = parent;
           parent.children.push(closedAt);
         }
+
         if (this.type === 'pull') {
           if (i.merged_at) {
             const merged = new IssueItem({
