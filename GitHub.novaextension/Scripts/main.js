@@ -177,12 +177,24 @@ function loadCommentCache(type, number) {
 
 async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
   const cache = loadCommentCache('issue', issueNumber);
+
   if (isRateLimited) {
+    console.log(
+      `[Comments] Issue #${issueNumber}: rate-limited, using cached comments (${cache?.data?.length || 0})`,
+    );
     return cache?.data || [];
   }
+
   if (cache?.count === expectedCount) {
+    console.log(
+      `[Comments] Issue #${issueNumber}: using cached comments (expected ${expectedCount}, got ${cache.data.length})`,
+    );
     return cache.data;
   }
+
+  console.log(
+    `[Comments] Issue #${issueNumber}: expected ${expectedCount}, cache has ${cache?.count ?? 'none'} → fetching from API`,
+  );
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
@@ -215,12 +227,24 @@ async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
 
 async function fetchReviewComments(pullNumber, expectedCount = 0) {
   const cache = loadCommentCache('pull', pullNumber);
+
   if (isRateLimited) {
+    console.log(
+      `[Comments] Issue #${issueNumber}: rate-limited, using cached comments (${cache?.data?.length || 0})`,
+    );
     return cache?.data || [];
   }
+
   if (cache?.count === expectedCount) {
+    console.log(
+      `[Comments] Issue #${issueNumber}: using cached comments (expected ${expectedCount}, got ${cache.data.length})`,
+    );
     return cache.data;
   }
+
+  console.log(
+    `[Comments] Issue #${issueNumber}: expected ${expectedCount}, cache has ${cache?.count ?? 'none'} → fetching from API`,
+  );
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
@@ -267,7 +291,7 @@ function loadConfig() {
   return {
     token: nova.config.get('token'),
     owner: nova.config.get('owner'),
-    repo: nova.config.get('repo'),
+    repo: nova.workspace.config.get('repo'),
     refreshInterval: nova.config.get('refreshInterval') || 10,
     itemsPerPage: Math.min(
       Math.max(parseInt(nova.config.get('itemsPerPage') || '30'), 1),
@@ -714,12 +738,12 @@ class GitHubIssuesProvider {
             : [];
         const allComments = [...comments, ...reviewComments];
 
-        console.log(
+        /*console.log(
           `[Comments] Issue #${i.number}: issueComments=`,
           comments.length,
           'reviewComments=',
           reviewComments.length,
-        );
+        );*/
         if (allComments.length > 0) {
           const group = new IssueItem({
             title: 'Comments',
