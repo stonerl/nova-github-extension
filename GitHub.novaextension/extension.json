@@ -39,6 +39,15 @@
     "requests": true
   },
 
+  "commands": {
+    "extensions": [
+      {
+        "title": "Refresh Issues and Pull Requests",
+        "command": "github-issues.refresh"
+      }
+    ]
+  },
+
   "sidebars": [
     {
       "id": "github-issues",
@@ -59,12 +68,6 @@
               "image": "__builtin.add",
               "tooltip": "Open new GitHub issue",
               "command": "github-issues.newIssue"
-            },
-            {
-              "title": "Refresh",
-              "image": "__builtin.refresh",
-              "tooltip": "Reload open issues",
-              "command": "github-issues.refresh"
             }
           ],
           "contextCommands": [
@@ -102,14 +105,6 @@
           "allowMultiple": false,
           "placeholderImage": "sidebar-large",
           "placeholderText": "No closed issues.",
-          "headerCommands": [
-            {
-              "title": "Refresh",
-              "image": "__builtin.refresh",
-              "tooltip": "Reload closed issues",
-              "command": "github-issues.refresh"
-            }
-          ],
           "contextCommands": [
             {
               "title": "Open on GitHub",
@@ -146,12 +141,6 @@
               "image": "__builtin.add",
               "tooltip": "Open new GitHub pull request",
               "command": "github-issues.newPullRequest"
-            },
-            {
-              "title": "Refresh",
-              "image": "__builtin.refresh",
-              "tooltip": "Reload open pull requests",
-              "command": "github-issues.refresh"
             }
           ],
           "contextCommands": [
@@ -173,14 +162,6 @@
           "allowMultiple": false,
           "placeholderImage": "sidebar-large",
           "placeholderText": "No closed pull requests.",
-          "headerCommands": [
-            {
-              "title": "Refresh",
-              "image": "__builtin.refresh",
-              "tooltip": "Reload closed pull requests",
-              "command": "github-issues.refresh"
-            }
-          ],
           "contextCommands": [
             {
               "title": "Open on GitHub",

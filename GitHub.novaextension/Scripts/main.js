@@ -348,7 +348,7 @@ class GitHubIssuesProvider {
 
         if (!isClosed || !i.closed_at) {
           const createdAt = new IssueItem({
-            title: 'Created:',
+            title: 'Created',
             body: new Date(i.created_at).toLocaleString(),
             image: 'issue_created',
           });
@@ -358,7 +358,7 @@ class GitHubIssuesProvider {
 
         if (!isClosed && i.updated_at && i.updated_at !== i.created_at) {
           const updatedAt = new IssueItem({
-            title: 'Updated:',
+            title: 'Updated',
             body: new Date(i.updated_at).toLocaleString(),
             image: 'issue_updated',
           });
@@ -368,7 +368,7 @@ class GitHubIssuesProvider {
 
         if (this.type === 'issue' && isClosed && i.closed_at) {
           const closedAt = new IssueItem({
-            title: 'Closed:',
+            title: 'Closed',
             body: new Date(i.closed_at).toLocaleString(),
             image:
               i.state_reason === 'not_planned' || i.state_reason === 'duplicate'
@@ -382,7 +382,7 @@ class GitHubIssuesProvider {
         if (this.type === 'pull') {
           if (i.merged_at) {
             const mergedItem = new IssueItem({
-              title: 'Merged:',
+              title: 'Merged',
               body: new Date(i.merged_at).toLocaleString(),
               image: 'issue_closed',
             });
@@ -390,7 +390,7 @@ class GitHubIssuesProvider {
             parent.children.push(mergedItem);
           } else if (i.state === 'closed' && i.closed_at) {
             const closedItem = new IssueItem({
-              title: 'Closed:',
+              title: 'Closed',
               body: new Date(i.closed_at).toLocaleString(),
               image: 'pr_closed',
             });
@@ -401,7 +401,7 @@ class GitHubIssuesProvider {
 
         if (i.user && i.user.login) {
           const authorItem = new IssueItem({
-            title: 'Author:',
+            title: 'Author',
             body: i.user.login,
             image: 'author',
           });
@@ -412,7 +412,7 @@ class GitHubIssuesProvider {
         if (Array.isArray(i.assignees) && i.assignees.length > 0) {
           for (const assignee of i.assignees) {
             const assigneeItem = new IssueItem({
-              title: 'Assignee:',
+              title: 'Assignee',
               body: assignee.login,
               image: 'assignee',
               tooltip: assignee.name || undefined,
@@ -422,7 +422,7 @@ class GitHubIssuesProvider {
           }
         } else if (i.assignee && i.assignee.login) {
           const assigneeItem = new IssueItem({
-            title: 'Assignee:',
+            title: 'Assignee',
             body: i.assignee.login,
             image: 'assignee',
             tooltip: i.assignee.name || undefined,
@@ -433,7 +433,7 @@ class GitHubIssuesProvider {
 
         if (i.milestone && i.milestone.title) {
           const milestoneItem = new IssueItem({
-            title: 'Milestone:',
+            title: 'Milestone',
             body: i.milestone.title,
             tooltip: i.milestone.description || undefined,
           });
@@ -443,7 +443,7 @@ class GitHubIssuesProvider {
           if (i.milestone.due_on) {
             const dueDate = new Date(i.milestone.due_on).toLocaleDateString();
             const dueItem = new IssueItem({
-              title: 'Due:',
+              title: 'Due',
               body: dueDate,
             });
             dueItem.parent = parent;
