@@ -1122,10 +1122,22 @@ async function updateIssueState(newState, reason) {
       openView.reload();
       closedView.reload();
     } else {
+      const errorMessage = await resp.text();
       console.error(
         `[Update] Failed to update issue #${issueNumber}`,
-        await resp.text(),
+        errorMessage,
       );
+
+      const request = new NotificationRequest(`update-failed-${issueNumber}`);
+      request.title = `Failed to Update Issue #${issueNumber}`;
+      request.body = `GitHub returned an error while trying to set state to "${newState}":\n${errorMessage}`;
+
+      nova.notifications.add(request).catch((err) => {
+        console.error(
+          `[Notify] Failed to display update failure notification`,
+          err,
+        );
+      });
     }
 
     break;
