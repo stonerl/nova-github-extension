@@ -1,10 +1,14 @@
 {
   "identifier": "stonerl.GitHub",
-  "name": "GitHub",
   "organization": "Toni Förster",
-  "description": "Browse, manage, and triage GitHub issues and pull requests directly from Nova’s sidebar.",
   "version": "0.2.0",
-  "categories": ["sidebars"],
+  "name": "GitHub",
+  "description": "Browse, manage, and triage GitHub issues and pull requests directly from Nova’s sidebar.",
+  "license": "MIT License",
+  "funding": "https://github.com/sponsors/stonerl",
+  "repository": "https://github.com/stonerl/nova-github-extension",
+  "bugs": "https://github.com/stonerl/nova-prettier-github/issues",
+  "categories": ["sidebars", "commands"],
 
   "main": "main.js",
   "activationEvents": ["onView:github-issues"],
