@@ -34,6 +34,15 @@
       "required": true
     },
     {
+      "key": "github.repos",
+      "type": "stringArray",
+      "title": "Repositories",
+      "description": "One or more GitHub repository names (e.g. nova-github-extension), without the URL.",
+      "default": [],
+      "placeholder": "nova-github-extension",
+      "required": true
+    },
+    {
       "key": "github.refreshInterval",
       "type": "number",
       "title": "Refresh Interval",
@@ -91,7 +100,7 @@
 
   "sidebars": [
     {
-      "id": "github-issues",
+      "id": "github",
       "smallImage": "sidebar-small",
       "largeImage": "sidebar-large",
       "name": "GitHub",
@@ -208,6 +217,23 @@
               "title": "Copy GitHub URL",
               "command": "github-issues.copyUrl",
               "when": "viewItem == 'issue-root'"
+            }
+          ]
+        },
+        {
+          "id": "repos",
+          "name": "Repositories",
+          "allowMultiple": false,
+          "placeholderImage": "sidebar-large",
+          "placeholderText": "No repositories configured.",
+          "contextCommands": [
+            {
+              "title": "Open on GitHub",
+              "command": "github-issues.openInBrowser"
+            },
+            {
+              "title": "Copy GitHub URL",
+              "command": "github-issues.copyUrl"
             }
           ]
         }

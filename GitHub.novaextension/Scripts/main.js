@@ -433,6 +433,17 @@ exports.activate = function () {
   });
   nova.subscriptions.add(openView, closedView, openPRView, closedPRView);
 
+  let reposView;
+  let reposProvider;
+  reposProvider = new GitHubRepoProvider();
+  reposView = new TreeView('repos', { dataProvider: reposProvider });
+  nova.subscriptions.add(reposView);
+
+  nova.config.observe('github.repos', () => {
+    reposProvider.updateRepoList(); // your method to update the internal list
+    reposView.reload(); // tell Nova to repaint the UI
+  });
+
   function clearOtherSelections(currentKey) {
     for (const key of Object.keys(selectedItems)) {
       if (key !== currentKey) selectedItems[key] = null;
@@ -606,6 +617,35 @@ class IssueItem {
     this.issue = issue;
     this.children = [];
     this.parent = null;
+  }
+}
+
+class GitHubRepoProvider {
+  constructor() {
+    this.rootItems = [];
+    this.updateRepoList();
+  }
+
+  updateRepoList() {
+    const repos = nova.config.get('github.repos') || [];
+    this.rootItems = repos.map((name) => {
+      const item = new TreeItem(name, TreeItemCollapsibleState.None);
+      item.identifier = name;
+      item.contextValue = 'repo-item';
+      return item;
+    });
+  }
+
+  getChildren() {
+    return this.rootItems;
+  }
+
+  getTreeItem(item) {
+    return item;
+  }
+
+  getParent() {
+    return null;
   }
 }
 
