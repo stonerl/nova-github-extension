@@ -41,23 +41,19 @@
     },
     {
       "key": "maxRecentItems",
-      "type": "string",
-      "title": "Recent Items",
-      "description": "Number of recently updated issues and PRs to display",
-      "required": true,
-      "placeholder": "150",
-      "default": 150
+      "type": "enum",
+      "title": "Visible Recent Items",
+      "description": "Number of recently updated issues and pull requests to display in the sidebar.",
+      "default": "50",
+      "values": ["10", "25", "50", "100"]
     },
     {
       "key": "itemsPerPage",
-      "type": "number",
-      "title": "Fetch Page Size",
-      "description": "Number of issues or pull requests to request per API call. Larger values reduce request count but increase payload size. Max is 100.",
-      "required": true,
-      "placeholder": "30",
-      "default": 30,
-      "minimum": 1,
-      "maximum": 100
+      "type": "enum",
+      "title": "Items per API Page",
+      "description": "Number of issues or pull requests to fetch per API call. Higher values reduce request frequency and improve ETag efficiency. The GitHub API allows up to 100 items per request.",
+      "default": "100",
+      "values": ["25", "50", "75", "100"]
     }
   ],
 

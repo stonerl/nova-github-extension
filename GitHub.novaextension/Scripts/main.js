@@ -608,6 +608,13 @@ class GitHubIssuesProvider {
   }
 
   async refreshWithData(data) {
+    const { token, owner, repo } = loadConfig();
+    if (!token || !owner || !repo) {
+      console.warn(
+        `[${this.type}-${this.state}] Missing config (token/owner/repo); skipping refresh`,
+      );
+      return false;
+    }
     return this._refreshInternal(data, true);
   }
 
