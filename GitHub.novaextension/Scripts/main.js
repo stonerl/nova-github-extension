@@ -1,37 +1,5 @@
 // main.js
 
-const pendingRefresh = new Set();
-let refreshTimeout = null;
-
-function scheduleRefresh(section) {
-  pendingRefresh.add(section);
-
-  if (refreshTimeout) clearTimeout(refreshTimeout);
-
-  refreshTimeout = setTimeout(async () => {
-    console.log(`[Refresh] Performing debounced refresh for:`, [
-      ...pendingRefresh,
-    ]);
-
-    if (pendingRefresh.has('issues') || pendingRefresh.has('closed-issues')) {
-      await openProvider.refresh(true);
-      openView.reload();
-      await closedProvider.refresh(true);
-      closedView.reload();
-    }
-
-    if (pendingRefresh.has('pulls') || pendingRefresh.has('closed-pulls')) {
-      await openPRProvider.refresh(true);
-      openPRView.reload();
-      await closedPRProvider.refresh(true);
-      closedPRView.reload();
-    }
-
-    pendingRefresh.clear();
-    refreshTimeout = null;
-  }, 60 * 1000); // debounce delay: 30s from last trigger
-}
-
 let isRateLimited = false;
 
 function resetRateLimitFlag() {
@@ -772,7 +740,18 @@ class GitHubIssuesProvider {
 
         // – creation & update timestamps
         const isClosed = i.state === 'closed';
-        if (!isClosed || !i.closed_at) {
+
+        if (isClosed && i.closed_at) {
+          const closedAt = new IssueItem({
+            title: 'Closed',
+            body: new Date(i.closed_at).toLocaleString(),
+            image: ['not_planned', 'duplicate'].includes(i.state_reason)
+              ? 'pr_closed'
+              : 'issue_closed',
+          });
+          closedAt.parent = parent;
+          parent.children.push(closedAt);
+        } else {
           const createdAt = new IssueItem({
             title: 'Created',
             body: new Date(i.created_at).toLocaleString(),
@@ -780,33 +759,16 @@ class GitHubIssuesProvider {
           });
           createdAt.parent = parent;
           parent.children.push(createdAt);
-        }
-        if (!isClosed && i.updated_at !== i.created_at) {
-          const updatedAt = new IssueItem({
-            title: 'Updated',
-            body: new Date(i.updated_at).toLocaleString(),
-            image: 'issue_updated',
-          });
-          updatedAt.parent = parent;
-          parent.children.push(updatedAt);
-        }
 
-        // – closed / merged for issues & PRs
-        if (this.type === 'issue' && isClosed) {
-          // use pr_closed for “not_planned” or “duplicate”, otherwise fall back
-          const closedImage = ['not_planned', 'duplicate'].includes(
-            i.state_reason,
-          )
-            ? 'pr_closed'
-            : 'issue_closed';
-
-          const closedAt = new IssueItem({
-            title: 'Closed',
-            body: new Date(i.closed_at).toLocaleString(),
-            image: closedImage,
-          });
-          closedAt.parent = parent;
-          parent.children.push(closedAt);
+          if (i.updated_at !== i.created_at) {
+            const updatedAt = new IssueItem({
+              title: 'Updated',
+              body: new Date(i.updated_at).toLocaleString(),
+              image: 'issue_updated',
+            });
+            updatedAt.parent = parent;
+            parent.children.push(updatedAt);
+          }
         }
 
         if (this.type === 'pull') {
@@ -1059,6 +1021,14 @@ async function updateIssueState(newState, reason) {
     const { token, owner, repo } = loadConfig();
     const issueNumber = root.issue.number;
 
+    if (newState === 'open') {
+      reason = 'reopened';
+    }
+
+    if (newState === 'closed' && !reason) {
+      reason = 'completed';
+    }
+
     const body = { state: newState };
     if (reason) body.state_reason = reason;
 
@@ -1079,10 +1049,78 @@ async function updateIssueState(newState, reason) {
       console.log(
         `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ''}`,
       );
-      // Refresh
-      if (await waitForIssueState(issueNumber, newState)) {
-        scheduleRefresh(section);
-      }
+
+      // Log before patch
+      console.log(
+        '[Patch] Before:',
+        JSON.stringify(
+          {
+            number: root.issue.number,
+            state: root.issue.state,
+            state_reason: root.issue.state_reason,
+            closed_at: root.issue.closed_at,
+            updated_at: root.issue.updated_at,
+          },
+          null,
+          2,
+        ),
+      );
+
+      // Patch local model
+      root.issue.state = newState;
+      root.issue.state_reason = reason ?? null;
+      root.issue.closed_at =
+        newState === 'closed' ? new Date().toISOString() : null;
+      root.issue.updated_at = new Date().toISOString();
+
+      // Move in cache
+      const type = 'issue';
+      const keyFrom = `${type}-${newState === 'closed' ? 'open' : 'closed'}`;
+      const keyTo = `${type}-${newState}`;
+
+      dataStore.cache[keyFrom] = (dataStore.cache[keyFrom] || []).filter(
+        (i) => i.id !== root.issue.id,
+      );
+      dataStore.cache[keyTo] = [root.issue, ...(dataStore.cache[keyTo] || [])];
+
+      const fromProvider =
+        newState === 'closed' ? openProvider : closedProvider;
+      const toProvider = newState === 'closed' ? closedProvider : openProvider;
+
+      // Remove from old provider's list
+      fromProvider.rootItems = fromProvider.rootItems.filter(
+        (item) => item.issue.id !== root.issue.id,
+      );
+      fromProvider.itemsById.delete(String(root.issue.id));
+
+      // Add to new provider
+      toProvider.rootItems.unshift(root);
+      toProvider.itemsById.set(String(root.issue.id), root);
+
+      // Log after patch
+      console.log(
+        '[Patch] After:',
+        JSON.stringify(
+          {
+            number: root.issue.number,
+            state: root.issue.state,
+            state_reason: root.issue.state_reason,
+            closed_at: root.issue.closed_at,
+            updated_at: root.issue.updated_at,
+          },
+          null,
+          2,
+        ),
+      );
+
+      // Clear children to force re-render
+      // Reload both views to reflect state change
+      await openProvider.refreshWithData(dataStore.cache['issue-open'] || []);
+      await closedProvider.refreshWithData(
+        dataStore.cache['issue-closed'] || [],
+      );
+      openView.reload();
+      closedView.reload();
     } else {
       console.error(
         `[Update] Failed to update issue #${issueNumber}`,
