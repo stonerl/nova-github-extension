@@ -1,4 +1,37 @@
 // main.js
+
+const pendingRefresh = new Set();
+let refreshTimeout = null;
+
+function scheduleRefresh(section) {
+  pendingRefresh.add(section);
+
+  if (refreshTimeout) clearTimeout(refreshTimeout);
+
+  refreshTimeout = setTimeout(async () => {
+    console.log(`[Refresh] Performing debounced refresh for:`, [
+      ...pendingRefresh,
+    ]);
+
+    if (pendingRefresh.has('issues') || pendingRefresh.has('closed-issues')) {
+      await openProvider.refresh(true);
+      openView.reload();
+      await closedProvider.refresh(true);
+      closedView.reload();
+    }
+
+    if (pendingRefresh.has('pulls') || pendingRefresh.has('closed-pulls')) {
+      await openPRProvider.refresh(true);
+      openPRView.reload();
+      await closedPRProvider.refresh(true);
+      closedPRView.reload();
+    }
+
+    pendingRefresh.clear();
+    refreshTimeout = null;
+  }, 60 * 1000); // debounce delay: 30s from last trigger
+}
+
 let isRateLimited = false;
 
 function resetRateLimitFlag() {
@@ -67,7 +100,7 @@ const dataStore = {
       throw new Error(`Rate-limited and no cache for "${state}"`);
     }
 
-    const { itemsPerPage = 30, maxRecentItems = 150 } = loadConfig();
+    const { itemsPerPage = 25, maxRecentItems = 50 } = loadConfig();
     let page = 1;
     let allItems = [];
     let etagUsed = false;
@@ -309,28 +342,28 @@ let selectedItems = {
 
 function loadConfig() {
   return {
-    token: nova.config.get('token'),
-    owner: nova.config.get('owner'),
-    repo: nova.workspace.config.get('repo'),
-    refreshInterval: nova.config.get('refreshInterval'),
-    maxRecentItems: Math.min(
-      Math.max(
-        isNaN(parseInt(nova.config.get('maxRecentItems'), 10))
-          ? 150
-          : parseInt(nova.config.get('maxRecentItems'), 10),
-        1,
-      ),
-      1000,
-    ),
-    itemsPerPage: Math.min(
-      Math.max(parseInt(nova.config.get('itemsPerPage') || '30'), 1),
-      100,
-    ),
+    token: nova.config.get('github.token'),
+    owner: nova.config.get('github.owner'),
+    repo: nova.workspace.config.get('github.repo'),
+    refreshInterval: nova.config.get('github.refreshInterval'),
+    maxRecentItems: nova.config.get('github.maxRecentItems'),
+    itemsPerPage: nova.config.get('github.itemsPerPage'),
   };
+}
+
+function isConfigReady() {
+  const { token, owner, repo } = loadConfig();
+  return !!(token && owner && repo);
+}
+
+function updateContextAvailability() {
+  nova.workspace.context.set('github.ready', isConfigReady());
 }
 
 exports.activate = function () {
   resetRateLimitFlag();
+
+  updateContextAvailability();
 
   // 6) Auto-refresh every 5 Minutes
   let refreshTimer = null;
@@ -339,6 +372,10 @@ exports.activate = function () {
     if (refreshTimer) clearInterval(refreshTimer);
 
     const { refreshInterval } = loadConfig();
+    if (!isConfigReady()) {
+      console.warn('[Auto-refresh] Skipped – config incomplete');
+      return;
+    }
     refreshTimer = setInterval(
       async () => {
         const { token, owner, repo } = loadConfig();
@@ -367,6 +404,10 @@ exports.activate = function () {
   setupAutoRefresh(); // run once immediately
 
   nova.config.observe('maxRecentItems', () => {
+    if (!isConfigReady()) {
+      console.warn('[maxRecentItems] Skipped – config incomplete');
+      return;
+    }
     if (
       !openProvider ||
       !closedProvider ||
@@ -449,6 +490,10 @@ exports.activate = function () {
 
   // 3) Initial load
   (async () => {
+    if (!isConfigReady()) {
+      console.warn('[Initial Load] Skipped – config incomplete');
+      return;
+    }
     const { token, owner, repo } = loadConfig();
     const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
       dataStore.fetchState('issue', 'open', token, owner, repo),
@@ -466,6 +511,10 @@ exports.activate = function () {
 
   // 4) “Refresh” runs both
   nova.commands.register('github-issues.refresh', async () => {
+    if (!isConfigReady()) {
+      console.warn('[Command: Refresh] Skipped – config incomplete');
+      return;
+    }
     const { token, owner, repo } = loadConfig();
     const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
       dataStore.fetchState('issue', 'open', token, owner, repo),
@@ -602,14 +651,26 @@ class GitHubIssuesProvider {
     this.initialized = false;
 
     // re-fetch if config changes
-    nova.config.observe('token', () => this._refreshInternal(true));
-    nova.config.observe('owner', () => this._refreshInternal(true));
-    nova.config.observe('repo', () => this._refreshInternal(true));
+    for (const key of ['github.token', 'github.owner']) {
+      nova.config.observe(key, () => {
+        updateContextAvailability();
+        if (isConfigReady()) this.refresh(true);
+      });
+    }
+
+    // Handle workspace config separately
+    nova.workspace.config.observe('github.repo', () => {
+      updateContextAvailability();
+      if (isConfigReady()) this.refresh(true);
+    });
+  }
+
+  async refresh(force = false) {
+    return this._refreshInternal(force);
   }
 
   async refreshWithData(data) {
-    const { token, owner, repo } = loadConfig();
-    if (!token || !owner || !repo) {
+    if (!isConfigReady()) {
       console.warn(
         `[${this.type}-${this.state}] Missing config (token/owner/repo); skipping refresh`,
       );
@@ -1020,17 +1081,7 @@ async function updateIssueState(newState, reason) {
       );
       // Refresh
       if (await waitForIssueState(issueNumber, newState)) {
-        if (section === 'issues' || section === 'closed-issues') {
-          await openProvider.refresh(true);
-          openView.reload();
-          await closedProvider.refresh(true);
-          closedView.reload();
-        } else if (section === 'pulls' || section === 'closed-pulls') {
-          await openPRProvider.refresh(true);
-          openPRView.reload();
-          await closedPRProvider.refresh(true);
-          closedPRView.reload();
-        }
+        scheduleRefresh(section);
       }
     } else {
       console.error(

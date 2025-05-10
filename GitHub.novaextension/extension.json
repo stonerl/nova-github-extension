@@ -11,7 +11,7 @@
 
   "config": [
     {
-      "key": "owner",
+      "key": "github.owner",
       "type": "string",
       "title": "Repository Owner",
       "description": "GitHub username or organization.",
@@ -20,17 +20,17 @@
       "required": true
     },
     {
-      "key": "token",
+      "key": "github.token",
       "type": "string",
       "title": "Personal Access Token",
-      "description": "Must have ‘repo’ (or ‘public_repo’) scope. Click the question mark to generate a token with the correct permissions.",
-      "link": "https://github.com/settings/tokens/new?scopes=repo&description=GitHub%20for%20Nova",
+      "description": "Must have 'public_repo' scope for public repositories. Use 'repo' only if private repository access is required. Click the question mark to generate a token with minimal permissions.",
+      "link": "https://github.com/settings/tokens/new?scopes=public_repo&description=GitHub%20for%20Nova",
       "default": "",
       "placeholder": "ghp_xxx...",
       "required": true
     },
     {
-      "key": "refreshInterval",
+      "key": "github.refreshInterval",
       "type": "number",
       "title": "Refresh Interval",
       "description": "How often (in minutes) to automatically refresh issues and PRs. Setting this too low may increase the chance of hitting GitHub’s rate limits.",
@@ -40,7 +40,7 @@
       "minimum": 1
     },
     {
-      "key": "maxRecentItems",
+      "key": "github.maxRecentItems",
       "type": "enum",
       "title": "Visible Recent Items",
       "description": "Number of recently updated issues and pull requests to display in the sidebar.",
@@ -48,7 +48,7 @@
       "values": ["10", "25", "50", "100"]
     },
     {
-      "key": "itemsPerPage",
+      "key": "github.itemsPerPage",
       "type": "enum",
       "title": "Items per API Page",
       "description": "Number of issues or pull requests to fetch per API call. Higher values reduce request frequency and improve ETag efficiency. The GitHub API allows up to 100 items per request.",
@@ -59,7 +59,7 @@
 
   "configWorkspace": [
     {
-      "key": "repo",
+      "key": "github.repo",
       "type": "string",
       "title": "Repository Name",
       "description": "Name of the GitHub repository (e.g. nova-github-extension, not the URL).",
@@ -79,7 +79,8 @@
     "extensions": [
       {
         "title": "Refresh Issues and Pull Requests",
-        "command": "github-issues.refresh"
+        "command": "github-issues.refresh",
+        "when": "github.ready"
       }
     ]
   },
