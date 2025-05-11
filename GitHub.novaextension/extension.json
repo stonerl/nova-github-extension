@@ -167,7 +167,15 @@
           "name": "Repositories",
           "allowMultiple": false,
           "placeholderImage": "sidebar-large",
-          "placeholderText": "No repositories configured."
+          "placeholderText": "No repositories configured.",
+          "headerCommands": [
+            {
+              "title": "Open on Github",
+              "image": "sidebar-small",
+              "tooltip": "Open Current Repository on GitHub",
+              "command": "github-issues.openInBrowser"
+            }
+          ]
         }
       ]
     },
@@ -230,14 +238,12 @@
           "allowMultiple": false,
           "placeholderImage": "sidebar-large",
           "placeholderText": "No repositories configured.",
-          "contextCommands": [
+          "headerCommands": [
             {
-              "title": "Open on GitHub",
+              "title": "Open on Github",
+              "image": "sidebar-small",
+              "tooltip": "Open Current Repository on GitHub",
               "command": "github-issues.openInBrowser"
-            },
-            {
-              "title": "Copy GitHub URL",
-              "command": "github-issues.copyUrl"
             }
           ]
         }

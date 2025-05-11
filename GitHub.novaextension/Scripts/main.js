@@ -616,6 +616,7 @@ exports.activate = function () {
   });
 
   nova.commands.register('github-issues.openInBrowser', () => {
+    // 1) Try to open the selected issue or comment
     for (const item of Object.values(selectedItems)) {
       const url =
         item?.html_url ||
@@ -630,7 +631,17 @@ exports.activate = function () {
       }
     }
 
-    console.warn('[Command] No valid issue or comment URL selected.');
+    // 2) If nothing selected, open the current repo instead
+    const { owner, repo } = loadConfig();
+    if (owner && repo) {
+      const repoURL = `https://github.com/${owner}/${repo}`;
+      console.log('[Command] Opening repository URL:', repoURL);
+      nova.openURL(repoURL);
+    } else {
+      console.warn(
+        '[Command] No valid issue/comment selected and no repo configured.',
+      );
+    }
   });
 
   nova.commands.register('github-issues.copyUrl', () => {
