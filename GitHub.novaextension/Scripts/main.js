@@ -317,11 +317,35 @@ let selectedItems = {
 };
 
 function loadConfig() {
-  const owner = nova.config.get('github.owner') || 'default';
-  const token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
-  if (!token) {
-    console.warn('[Config] No GitHub token in Keychain for', owner);
+  // 1) Owner is now mandatory
+  const owner = nova.config.get('github.owner');
+  if (!owner) {
+    console.error('[Config] github.owner must be set');
+    return { token: null, owner: null, repo: null /*…*/ };
   }
+
+  // 2) First try to load under the real owner
+  let token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+
+  // 3) If this is the first time they've set an owner,
+  //    migrate the old “default” token over
+  if (!token) {
+    const defaultToken = nova.credentials.getPassword(
+      CREDENTIALS_SERVICE,
+      'default',
+    );
+    if (defaultToken) {
+      nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, defaultToken);
+      nova.credentials.removePassword(CREDENTIALS_SERVICE, 'default');
+      token = defaultToken;
+      console.log(`[Config] Migrated token from “default” → “${owner}”`);
+    }
+  }
+
+  if (!token) {
+    console.warn('[Config] No GitHub token in Keychain for owner:', owner);
+  }
+
   return {
     token,
     owner,
