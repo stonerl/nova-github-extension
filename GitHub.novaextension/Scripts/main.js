@@ -645,6 +645,7 @@ exports.activate = function () {
   });
 
   nova.commands.register('github-issues.copyUrl', () => {
+    // 1) Try to copy the selected issue’s URL
     for (const [section, item] of Object.entries(selectedItems)) {
       console.log(
         `[Command] [Copy URL] Section "${section}" selected item:`,
@@ -653,12 +654,27 @@ exports.activate = function () {
 
       if (item?.issue?.html_url) {
         nova.clipboard.writeText(item.issue.html_url);
-        console.log('[Command] URL copied to clipboard:', item.issue.html_url);
+        console.log(
+          '[Command] Issue URL copied to clipboard:',
+          item.issue.html_url,
+        );
         return;
       }
     }
 
-    console.warn('[Command] No selected node with valid issue URL to copy.');
+    // 2) Fallback: copy the current repository’s URL
+    const { owner, repo } = loadConfig();
+    if (owner && repo) {
+      const repoUrl = `https://github.com/${owner}/${repo}`;
+      nova.clipboard.writeText(repoUrl);
+      console.log('[Command] Repository URL copied to clipboard:', repoUrl);
+      return;
+    }
+
+    // 3) Nothing to copy
+    console.warn(
+      '[Command] No issue selected and no repository configured; nothing to copy.',
+    );
   });
 
   nova.commands.register('github-issues.closeIssue', async () => {

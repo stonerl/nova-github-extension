@@ -170,10 +170,18 @@
           "placeholderText": "No repositories configured.",
           "headerCommands": [
             {
+              "title": "Copy Repository URL",
+              "image": "copy",
+              "tooltip": "Copy Current Repository URL to Clipboard",
+              "command": "github-issues.copyUrl",
+              "when": "github.ready"
+            },
+            {
               "title": "Open on Github",
               "image": "sidebar-small",
               "tooltip": "Open Current Repository on GitHub",
-              "command": "github-issues.openInBrowser"
+              "command": "github-issues.openInBrowser",
+              "when": "github.ready"
             }
           ]
         }
@@ -240,10 +248,18 @@
           "placeholderText": "No repositories configured.",
           "headerCommands": [
             {
+              "title": "Copy Repository URL",
+              "image": "copy",
+              "tooltip": "Copy Current Repository URL to Clipboard",
+              "command": "github-issues.copyUrl",
+              "when": "github.ready"
+            },
+            {
               "title": "Open on Github",
               "image": "sidebar-small",
               "tooltip": "Open Current Repository on GitHub",
-              "command": "github-issues.openInBrowser"
+              "command": "github-issues.openInBrowser",
+              "when": "github.ready"
             }
           ]
         }
