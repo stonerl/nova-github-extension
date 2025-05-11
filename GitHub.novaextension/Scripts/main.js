@@ -15,16 +15,23 @@ function applyRateLimit(resetAt, label) {
   setTimeout(resetRateLimitFlag, Math.max(ms, 0));
 }
 
-const cacheDir = nova.extension.globalStoragePath;
+const cacheDir = `${nova.extension.globalStoragePath}/cache`;
+
+function ensureDirExists(dir) {
+  try {
+    nova.fs.mkdir(dir);
+  } catch (err) {
+    // if it already exists, mkdir will throw; ignore that
+    // any other error you’d probably want to know about
+  }
+}
 
 function cachePath(type, state) {
   const { owner, repo } = loadConfig();
   const repoDir = `${cacheDir}/${owner}-${repo}`;
-  try {
-    nova.fs.access(repoDir, nova.fs.F_OK);
-  } catch {
-    nova.fs.mkdir(repoDir);
-  }
+
+  ensureDirExists(repoDir);
+
   return `${repoDir}/${type}-${state}.json`; // e.g. pull-open.json
 }
 
@@ -165,7 +172,6 @@ const dataStore = {
 function commentCachePath(type, number) {
   const { owner, repo } = loadConfig();
   const repoDir = `${cacheDir}/${owner}-${repo}`;
-  ensureDirExists(cacheDir);
   ensureDirExists(repoDir);
   return `${repoDir}/comments-${type}-${number}.json`;
 }
@@ -412,11 +418,7 @@ exports.activate = function () {
   });
 
   // ensure your extension's global storage folder exists
-  try {
-    nova.fs.access(cacheDir, nova.fs.F_OK);
-  } catch {
-    nova.fs.mkdir(cacheDir);
-  }
+  ensureDirExists(cacheDir);
 
   // Instantiate providers
   openProvider = new GitHubIssuesProvider('open', 'issue');
