@@ -8,6 +8,18 @@ function resetRateLimitFlag() {
   isRateLimited = false;
 }
 
+function getLastRefresh() {
+  return nova.config.get('github.lastRefresh') || 0;
+}
+
+function setLastRefresh(ts) {
+  try {
+    nova.config.set('github.lastRefresh', ts);
+  } catch (e) {
+    console.warn('[Config] Failed to record last refresh:', e);
+  }
+}
+
 function applyRateLimit(resetAt, label) {
   console.warn(
     `[GitHub] ${label} rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
@@ -381,28 +393,42 @@ exports.activate = function () {
       console.warn('[Auto-refresh] Skipped – config incomplete');
       return;
     }
-    refreshTimer = setInterval(
-      async () => {
-        const { token, owner, repo } = loadConfig();
-        const [openIssues, closedIssues, openPRs, closedPRs] =
-          await Promise.all([
-            dataStore.fetchState('issue', 'open', token, owner, repo),
-            dataStore.fetchState('issue', 'closed', token, owner, repo),
-            dataStore.fetchState('pull', 'open', token, owner, repo),
-            dataStore.fetchState('pull', 'closed', token, owner, repo),
-          ]);
 
-        if (await openProvider.refreshWithData(openIssues)) openView.reload();
-        if (await closedProvider.refreshWithData(closedIssues))
-          closedView.reload();
-        if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
-        if (await closedPRProvider.refreshWithData(closedPRs))
-          closedPRView.reload();
+    // The actual work, but guarded by lastRefresh
+    const doRefresh = async () => {
+      const now = Date.now();
+      const last = getLastRefresh();
+      if (now - last < refreshInterval * 60 * 1000) {
+        console.log(
+          `[Auto-refresh] Skipped; only ${Math.floor((now - last) / 1000)}s since last`,
+        );
+        return;
+      }
 
-        console.log('[Auto-refresh] Views updated');
-      },
-      refreshInterval * 60 * 1000,
-    );
+      const { token, owner, repo } = loadConfig();
+      const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
+        dataStore.fetchState('issue', 'open', token, owner, repo),
+        dataStore.fetchState('issue', 'closed', token, owner, repo),
+        dataStore.fetchState('pull', 'open', token, owner, repo),
+        dataStore.fetchState('pull', 'closed', token, owner, repo),
+      ]);
+
+      if (await openProvider.refreshWithData(openIssues)) openView.reload();
+      if (await closedProvider.refreshWithData(closedIssues))
+        closedView.reload();
+      if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
+      if (await closedPRProvider.refreshWithData(closedPRs))
+        closedPRView.reload();
+
+      setLastRefresh(now);
+      console.log('[Auto-refresh] Views updated');
+    };
+
+    // schedule it
+    refreshTimer = setInterval(doRefresh, refreshInterval * 60 * 1000);
+
+    // and kick it off once immediately
+    doRefresh();
   }
 
   nova.config.observe('refreshInterval', setupAutoRefresh);
@@ -601,12 +627,40 @@ exports.activate = function () {
     clearOtherSelections('closed-pulls');
   });
 
-  // 3) Initial load
+  // 3) Initial load (only if it’s been longer than a full interval)
   (async () => {
+    const now = Date.now();
+    const { refreshInterval } = loadConfig();
+
+    if (now - getLastRefresh() < refreshInterval * 60_000) {
+      console.log(
+        `[Initial Load] Skipped; only ${Math.floor(
+          (now - getLastRefresh()) / 1000,
+        )}s since last — loading from cache instead`,
+      );
+      // load whatever’s on disk and populate the views
+      const cachedOpenIssues = loadCache('issue', 'open') || [];
+      const cachedClosedIssues = loadCache('issue', 'closed') || [];
+      const cachedOpenPRs = loadCache('pull', 'open') || [];
+      const cachedClosedPRs = loadCache('pull', 'closed') || [];
+
+      await openProvider.refreshWithData(cachedOpenIssues);
+      await closedProvider.refreshWithData(cachedClosedIssues);
+      await openPRProvider.refreshWithData(cachedOpenPRs);
+      await closedPRProvider.refreshWithData(cachedClosedPRs);
+
+      openView.reload();
+      closedView.reload();
+      openPRView.reload();
+      closedPRView.reload();
+      return;
+    }
+
     if (!isConfigReady()) {
       console.warn('[Initial Load] Skipped – config incomplete');
       return;
     }
+
     const { token, owner, repo } = loadConfig();
     const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
       dataStore.fetchState('issue', 'open', token, owner, repo),
@@ -620,6 +674,9 @@ exports.activate = function () {
     if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
     if (await closedPRProvider.refreshWithData(closedPRs))
       closedPRView.reload();
+
+    // record that we just did our “initial” fetch
+    setLastRefresh(now);
   })();
 
   // 4) “Refresh” runs both
