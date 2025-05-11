@@ -443,9 +443,28 @@ exports.activate = function () {
 
   reposView.onDidChangeSelection((items) => {
     const selected = items[0];
-    if (!selected || !selected.identifier) return;
+    // 1) ignore if they clicked nothing—or the separator visual
+    if (!selected || selected.contextValue === 'separator') {
+      return;
+    }
 
-    const newRepo = selected.identifier;
+    const repos = nova.config.get('github.repos') || [];
+    let newRepo = items[0]?.identifier;
+
+    // if they didn’t actually pick one (or it’s no longer in the list),
+    // default back to the very first repo
+    if (!newRepo || !repos.includes(newRepo)) {
+      if (repos.length === 0) {
+        console.warn('[RepoSelect] No repos configured, nothing to do.');
+        return;
+      }
+      newRepo = repos[0];
+      nova.workspace.config.set('github.repo', newRepo);
+      console.log(
+        `[RepoSelect] No valid selection → defaulting to "${newRepo}"`,
+      );
+    }
+
     const currentRepo = nova.workspace.config.get('github.repo');
     if (newRepo === currentRepo) {
       console.log(`[RepoSelect] Repo "${newRepo}" is already selected.`);
@@ -692,10 +711,24 @@ class GitHubRepoProvider {
   }
 
   updateRepoList() {
+    // 1) load all repos from config
     const repos = nova.config.get('github.repos') || [];
-    const currentRepo = nova.workspace.config.get('github.repo');
 
-    // Put current repo first
+    // 2) figure out the “current” repo
+    let currentRepo = nova.workspace.config.get('github.repo');
+
+    // 3) if none is set or it’s not in the list, pick the first one
+    if (!currentRepo || !repos.includes(currentRepo)) {
+      if (repos.length > 0) {
+        currentRepo = repos[0];
+        nova.workspace.config.set('github.repo', currentRepo);
+        console.log(
+          `[RepoSelect] No valid current repo, defaulting to "${currentRepo}"`,
+        );
+      }
+    }
+
+    // 4) now build the TreeItems
     const items = [];
 
     if (currentRepo) {
@@ -706,16 +739,12 @@ class GitHubRepoProvider {
       items.push(current);
 
       // Add separator
-      const separator = new TreeItem(
-        '──────────',
-        TreeItemCollapsibleState.None,
-      );
-      separator.selectable = false;
+      const separator = new TreeItem('', TreeItemCollapsibleState.None);
       separator.contextValue = 'separator';
-      items.push(separator);
+      (separator.image = '__builtin.remove'), items.push(separator);
     }
 
-    // Add all other repos except the current one
+    // 5) Add all other repos except the current one
     const remaining = repos.filter((r) => r !== currentRepo);
     for (const name of remaining) {
       const item = new TreeItem(name, TreeItemCollapsibleState.None);
