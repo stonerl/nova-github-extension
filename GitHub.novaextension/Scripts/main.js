@@ -1,5 +1,7 @@
 // main.js
 
+const CREDENTIALS_SERVICE = 'github-for-nova';
+
 let isRateLimited = false;
 
 function resetRateLimitFlag() {
@@ -315,9 +317,14 @@ let selectedItems = {
 };
 
 function loadConfig() {
+  const owner = nova.config.get('github.owner') || 'default';
+  const token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+  if (!token) {
+    console.warn('[Config] No GitHub token in Keychain for', owner);
+  }
   return {
-    token: nova.config.get('github.token'),
-    owner: nova.config.get('github.owner'),
+    token,
+    owner,
     repo: nova.workspace.config.get('github.repo'),
     refreshInterval: nova.config.get('github.refreshInterval'),
     maxRecentItems: nova.config.get('github.maxRecentItems'),
@@ -526,6 +533,25 @@ exports.activate = function () {
   nova.config.observe('github.repos', () => {
     reposProvider.updateRepoList(); // your method to update the internal list
     reposView.reload(); // tell Nova to repaint the UI
+  });
+
+  // inside exports.activate(), before you call updateContextAvailability():
+  nova.config.observe('github.token', (newValue) => {
+    const owner = nova.config.get('github.owner') || 'default';
+    if (newValue === '') {
+      nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
+      console.log('[Config] GitHub token removed from Keychain');
+    } else if (newValue && newValue !== '***') {
+      const owner = nova.config.get('github.owner') || 'default';
+      try {
+        nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, newValue);
+        // mask the setting so it never stays in cleartext
+        nova.config.set('github.token', '***');
+        console.log('[Config] GitHub token moved to Keychain');
+      } catch (err) {
+        console.error('[Config] Failed to save token to Keychain:', err);
+      }
+    }
   });
 
   function clearOtherSelections(currentKey) {
