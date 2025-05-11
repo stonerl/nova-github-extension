@@ -100,10 +100,10 @@
 
   "sidebars": [
     {
-      "id": "github",
+      "id": "github-issues",
       "smallImage": "sidebar-small",
       "largeImage": "sidebar-large",
-      "name": "GitHub",
+      "name": "GitHub (Issues)",
 
       "sections": [
         {
@@ -174,6 +174,32 @@
             }
           ]
         },
+        {
+          "id": "repos",
+          "name": "Repositories",
+          "allowMultiple": false,
+          "placeholderImage": "sidebar-large",
+          "placeholderText": "No repositories configured.",
+          "contextCommands": [
+            {
+              "title": "Open on GitHub",
+              "command": "github-issues.openInBrowser"
+            },
+            {
+              "title": "Copy GitHub URL",
+              "command": "github-issues.copyUrl"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "github-pull",
+      "smallImage": "sidebar-small",
+      "largeImage": "sidebar-large",
+      "name": "GitHub (PRs)",
+
+      "sections": [
         {
           "id": "pulls",
           "name": "Open Pull Requests",

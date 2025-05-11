@@ -439,6 +439,67 @@ exports.activate = function () {
   reposView = new TreeView('repos', { dataProvider: reposProvider });
   nova.subscriptions.add(reposView);
 
+  reposView.onDidChangeSelection((items) => {
+    const selected = items[0];
+    if (!selected || !selected.identifier) return;
+
+    const newRepo = selected.identifier;
+    const currentRepo = nova.workspace.config.get('github.repo');
+    if (newRepo === currentRepo) {
+      console.log(`[RepoSelect] Repo "${newRepo}" is already selected.`);
+      return;
+    }
+
+    console.log(`[RepoSelect] Switching repo to "${newRepo}"`);
+    nova.workspace.config.set('github.repo', newRepo);
+
+    // Clear selection
+    Object.keys(selectedItems).forEach((k) => (selectedItems[k] = null));
+
+    // Reset each provider’s internal state
+    openProvider.rootItems = [];
+    openProvider.itemsById.clear();
+    closedProvider.rootItems = [];
+    closedProvider.itemsById.clear();
+    openPRProvider.rootItems = [];
+    openPRProvider.itemsById.clear();
+    closedPRProvider.rootItems = [];
+    closedPRProvider.itemsById.clear();
+
+    // Clear cache
+    dataStore.cache = {};
+    dataStore.etags = {};
+
+    // Delay to let workspace config observers update
+    setTimeout(() => {
+      if (!isConfigReady()) {
+        console.warn('[RepoSelect] Skipped fetch – config incomplete');
+        return;
+      }
+
+      const { token, owner, repo } = loadConfig(); // repo is now up to date
+      Promise.all([
+        dataStore.fetchState('issue', 'open', token, owner, repo),
+        dataStore.fetchState('issue', 'closed', token, owner, repo),
+        dataStore.fetchState('pull', 'open', token, owner, repo),
+        dataStore.fetchState('pull', 'closed', token, owner, repo),
+      ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
+        openProvider
+          .refreshWithData(openIssues)
+          .then((c) => c && openView.reload());
+        closedProvider
+          .refreshWithData(closedIssues)
+          .then((c) => c && closedView.reload());
+        openPRProvider
+          .refreshWithData(openPRs)
+          .then((c) => c && openPRView.reload());
+        closedPRProvider
+          .refreshWithData(closedPRs)
+          .then((c) => c && closedPRView.reload());
+      });
+    }, 50);
+  });
+
   nova.config.observe('github.repos', () => {
     reposProvider.updateRepoList(); // your method to update the internal list
     reposView.reload(); // tell Nova to repaint the UI
@@ -913,8 +974,14 @@ class GitHubIssuesProvider {
 
             // build a tooltip of up to 25 lines
             const allLines = c.body.split(/\r?\n/);
-            const snippet = allLines.slice(0, 25);
-            if (allLines.length > 25) snippet.push('…');
+            const snippet = allLines.slice(0, 20);
+            if (allLines.length > 20) snippet.push('…');
+
+            // Trim leading/trailing empty lines
+            while (snippet.length && snippet[0].trim() === '') snippet.shift();
+            while (snippet.length && snippet[snippet.length - 1].trim() === '')
+              snippet.pop();
+
             const tooltipBody = snippet.join('\n');
             const author = c.user?.login || 'unknown';
             const tooltip = `${author} on ${commentDate}:\n\n${tooltipBody}`;
