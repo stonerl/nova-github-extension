@@ -173,15 +173,13 @@
               "title": "Copy Repository URL",
               "image": "copy",
               "tooltip": "Copy Current Repository URL to Clipboard",
-              "command": "github-issues.copyUrl",
-              "when": "github.ready"
+              "command": "github-issues.copyUrl"
             },
             {
               "title": "Open on Github",
               "image": "sidebar-small",
               "tooltip": "Open Current Repository on GitHub",
-              "command": "github-issues.openInBrowser",
-              "when": "github.ready"
+              "command": "github-issues.openInBrowser"
             }
           ]
         }
@@ -251,15 +249,13 @@
               "title": "Copy Repository URL",
               "image": "copy",
               "tooltip": "Copy Current Repository URL to Clipboard",
-              "command": "github-issues.copyUrl",
-              "when": "github.ready"
+              "command": "github-issues.copyUrl"
             },
             {
               "title": "Open on Github",
               "image": "sidebar-small",
               "tooltip": "Open Current Repository on GitHub",
-              "command": "github-issues.openInBrowser",
-              "when": "github.ready"
+              "command": "github-issues.openInBrowser"
             }
           ]
         }
