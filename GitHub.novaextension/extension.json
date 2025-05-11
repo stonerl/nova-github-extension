@@ -195,8 +195,8 @@
     },
     {
       "id": "github-pull",
-      "smallImage": "sidebar-small",
-      "largeImage": "sidebar-large",
+      "smallImage": "pull_requests",
+      "largeImage": "pull_requests_large",
       "name": "GitHub (PRs)",
 
       "sections": [
@@ -204,7 +204,7 @@
           "id": "pulls",
           "name": "Open Pull Requests",
           "allowMultiple": false,
-          "placeholderImage": "sidebar-large",
+          "placeholderImage": "pull_requests_large",
           "placeholderText": "No open pull requests.",
           "headerCommands": [
             {
@@ -231,7 +231,7 @@
           "id": "closed-pulls",
           "name": "Closed Pull Requests",
           "allowMultiple": false,
-          "placeholderImage": "sidebar-large",
+          "placeholderImage": "pull_requests_large",
           "placeholderText": "No closed pull requests.",
           "contextCommands": [
             {

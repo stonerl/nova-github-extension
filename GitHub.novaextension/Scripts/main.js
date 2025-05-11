@@ -65,7 +65,8 @@ const dataStore = {
         this.cache[key] = disk;
         return disk;
       }
-      throw new Error(`Rate-limited and no cache for "${state}"`);
+      this.cache[key] = []; // ← this ensures views get empty data
+      return [];
     }
 
     const { itemsPerPage = 25, maxRecentItems = 50 } = loadConfig();
@@ -155,7 +156,8 @@ const dataStore = {
         this.cache[key] = disk;
         return disk;
       }
-      throw err;
+      this.cache[key] = []; // fallback to empty
+      return []; // explicitly return empty data
     }
   },
 };
@@ -163,11 +165,8 @@ const dataStore = {
 function commentCachePath(type, number) {
   const { owner, repo } = loadConfig();
   const repoDir = `${cacheDir}/${owner}-${repo}`;
-  try {
-    nova.fs.access(repoDir, nova.fs.F_OK);
-  } catch {
-    nova.fs.mkdir(repoDir);
-  }
+  ensureDirExists(cacheDir);
+  ensureDirExists(repoDir);
   return `${repoDir}/comments-${type}-${number}.json`;
 }
 
@@ -175,6 +174,7 @@ function saveCommentCache(type, number, etag, data) {
   const path = commentCachePath(type, number);
   const payload = { etag, data };
   try {
+    // again, 'w+t' will create the file if it doesn't exist
     const file = nova.fs.open(path, 'w+t');
     file.write(JSON.stringify(payload));
     file.close();
@@ -497,7 +497,7 @@ exports.activate = function () {
           .refreshWithData(closedPRs)
           .then((c) => c && closedPRView.reload());
       });
-    }, 50);
+    }, 150);
   });
 
   nova.config.observe('github.repos', () => {
@@ -689,12 +689,39 @@ class GitHubRepoProvider {
 
   updateRepoList() {
     const repos = nova.config.get('github.repos') || [];
-    this.rootItems = repos.map((name) => {
+    const currentRepo = nova.workspace.config.get('github.repo');
+
+    // Put current repo first
+    const items = [];
+
+    if (currentRepo) {
+      const current = new TreeItem(currentRepo, TreeItemCollapsibleState.None);
+      current.identifier = currentRepo;
+      current.contextValue = 'repo-item';
+      current.image = 'pull_requests';
+      items.push(current);
+
+      // Add separator
+      const separator = new TreeItem(
+        '──────────',
+        TreeItemCollapsibleState.None,
+      );
+      separator.selectable = false;
+      separator.contextValue = 'separator';
+      items.push(separator);
+    }
+
+    // Add all other repos except the current one
+    const remaining = repos.filter((r) => r !== currentRepo);
+    for (const name of remaining) {
       const item = new TreeItem(name, TreeItemCollapsibleState.None);
       item.identifier = name;
       item.contextValue = 'repo-item';
-      return item;
-    });
+      item.image = 'sidebar-small';
+      items.push(item);
+    }
+
+    this.rootItems = items;
   }
 
   getChildren() {
