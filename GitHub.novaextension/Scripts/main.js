@@ -499,7 +499,9 @@ exports.activate = function () {
           .refreshWithData(closedPRs)
           .then((c) => c && closedPRView.reload());
       });
-    }, 150);
+    }, 50);
+    reposProvider.updateRepoList(); // your method to update the internal list
+    reposView.reload();
   });
 
   nova.config.observe('github.repos', () => {
