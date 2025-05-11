@@ -735,7 +735,7 @@ class GitHubRepoProvider {
       const current = new TreeItem(currentRepo, TreeItemCollapsibleState.None);
       current.identifier = currentRepo;
       current.contextValue = 'repo-item';
-      current.image = 'pull_requests';
+      current.image = 'sidebar-small';
       items.push(current);
 
       // Add separator
@@ -750,7 +750,7 @@ class GitHubRepoProvider {
       const item = new TreeItem(name, TreeItemCollapsibleState.None);
       item.identifier = name;
       item.contextValue = 'repo-item';
-      item.image = 'sidebar-small';
+      item.image = 'code_branch';
       items.push(item);
     }
 

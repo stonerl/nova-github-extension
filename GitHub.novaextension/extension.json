@@ -70,18 +70,6 @@
     }
   ],
 
-  "configWorkspace": [
-    {
-      "key": "github.repo",
-      "type": "string",
-      "title": "Repository Name",
-      "description": "Name of the GitHub repository (e.g. nova-github-extension, not the URL).",
-      "default": "",
-      "placeholder": "nova-github-extension",
-      "required": true
-    }
-  ],
-
   "entitlements": {
     "clipboard": true,
     "filesystem": "readwrite",
