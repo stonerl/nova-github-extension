@@ -36,6 +36,7 @@ function flushTokenSave() {
     nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, token);
     // mask the setting so it never stays in cleartext
     nova.config.set("github.token", "***");
+    invalidateConfigCache(); // cached config may hold token: null
     console.log("[Config] GitHub token moved to Keychain");
   } catch (err) {
     console.error("[Config] Failed to save token to Keychain:", err);

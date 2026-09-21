@@ -21,6 +21,16 @@ function invalidateConfigCache() {
   configCacheAt = 0;
 }
 
+// Console messages cross into Nova's process — floods of them can lock
+// up the UI bridge. Repeating warnings go out at most once per 30s.
+const lastLogAt = {};
+function logThrottled(key, fn) {
+  const now = Date.now();
+  if (lastLogAt[key] && now - lastLogAt[key] < 30_000) return;
+  lastLogAt[key] = now;
+  fn();
+}
+
 function readScoped(config, key) {
   const workspaceValue = nova.workspace.config.get(key);
   if (workspaceValue !== null && workspaceValue !== undefined) {
@@ -39,44 +49,53 @@ function loadConfig() {
     return configCache;
   }
 
+  let result;
+
   // 1) Owner is mandatory. Workspace override wins, global fallback.
   const owner = readScoped(nova.config, "github.owner");
   if (!owner) {
-    console.error("[Config] github.owner must be set");
-    return { token: null, owner: null, repo: null /*…*/ };
-  }
-
-  // 2) First try to load under the real owner
-  let token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
-
-  // 3) If this is the first time they've set an owner,
-  //    migrate the old “default” token over
-  if (!token) {
-    const defaultToken = nova.credentials.getPassword(
-      CREDENTIALS_SERVICE,
-      "default",
+    logThrottled("no-owner", () =>
+      console.error("[Config] github.owner must be set"),
     );
-    if (defaultToken) {
-      nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, defaultToken);
-      nova.credentials.removePassword(CREDENTIALS_SERVICE, "default");
-      token = defaultToken;
-      console.log(`[Config] Migrated token from “default” → “${owner}”`);
+    result = { token: null, owner: null, repo: null /*…*/ };
+  } else {
+    // 2) First try to load under the real owner
+    let token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+
+    // 3) If this is the first time they've set an owner,
+    //    migrate the old “default” token over
+    if (!token) {
+      const defaultToken = nova.credentials.getPassword(
+        CREDENTIALS_SERVICE,
+        "default",
+      );
+      if (defaultToken) {
+        nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, defaultToken);
+        nova.credentials.removePassword(CREDENTIALS_SERVICE, "default");
+        token = defaultToken;
+        console.log(`[Config] Migrated token from “default” → “${owner}”`);
+      }
     }
+
+    if (!token) {
+      logThrottled("no-token", () =>
+        console.warn("[Config] No GitHub token in Keychain for owner:", owner),
+      );
+    }
+
+    result = {
+      token,
+      owner,
+      repo: nova.workspace.config.get("github.repo"),
+      refreshInterval: nova.config.get("github.refreshInterval"),
+      maxRecentItems: nova.config.get("github.maxRecentItems"),
+      itemsPerPage: nova.config.get("github.itemsPerPage"),
+    };
   }
 
-  if (!token) {
-    console.warn("[Config] No GitHub token in Keychain for owner:", owner);
-  }
-
-  const result = {
-    token,
-    owner,
-    repo: nova.workspace.config.get("github.repo"),
-    refreshInterval: nova.config.get("github.refreshInterval"),
-    maxRecentItems: nova.config.get("github.maxRecentItems"),
-    itemsPerPage: nova.config.get("github.itemsPerPage"),
-  };
-
+  // Cache incomplete results too: while config is missing, observers
+  // and refreshes still call loadConfig constantly, and without this
+  // every call would repeat the config round-trips.
   configCache = result;
   configCacheAt = now;
   return result;

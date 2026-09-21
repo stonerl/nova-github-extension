@@ -11,31 +11,66 @@ const {
 } = require("./cache.js");
 
 let isRateLimited = false;
+const rateLimitLogged = new Set();
 
 function resetRateLimitFlag() {
   isRateLimited = false;
 }
 
-function applyRateLimit(resetAt, label) {
-  console.warn(
-    `[GitHub] ${label} rate-limit; resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`,
-  );
+function applyRateLimit(resetAt, retryAfterSeconds, label) {
   isRateLimited = true;
-  const ms = resetAt * 1000 - Date.now();
-  setTimeout(
-    () => {
-      isRateLimited = false;
-    },
-    Math.max(ms, 0),
-  );
+
+  // Log once per label per limit window — hundreds of in-flight
+  // requests can hit the limit simultaneously, and a console flood
+  // can lock up Nova's UI bridge.
+  if (!rateLimitLogged.has(label)) {
+    rateLimitLogged.add(label);
+    const resetDesc =
+      resetAt > 0
+        ? `resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`
+        : "pausing for at least 60s";
+    console.warn(`[GitHub] ${label} rate-limited; ${resetDesc}`);
+  }
+
+  let ms;
+  if (retryAfterSeconds > 0) {
+    ms = retryAfterSeconds * 1000;
+  } else if (resetAt > 0) {
+    ms = resetAt * 1000 - Date.now();
+  } else {
+    ms = 0;
+  }
+  // Never release instantly: secondary-limit responses often lack
+  // reset headers, and an instant release lets still-in-flight
+  // requests re-trigger the limit in a loop.
+  ms = Math.max(ms, 60_000);
+  setTimeout(() => {
+    isRateLimited = false;
+    rateLimitLogged.delete(label);
+  }, ms);
 }
 
 const dataStore = {
   cache: {},
   etags: {},
   pullDetails: {},
+  _inFlight: {},
 
-  async fetchState(type, state, token, owner, repo) {
+  // Deduplicates concurrent identical fetches: activation triggers two
+  // loads of the same four lists; they share one request each.
+  fetchState(type, state, token, owner, repo) {
+    const key = `${type}-${state}`;
+    if (this._inFlight[key]) return this._inFlight[key];
+    const pending = this._fetchState(type, state, token, owner, repo).finally(
+      () => {
+        delete this._inFlight[key];
+      },
+    );
+    this._inFlight[key] = pending;
+    return pending;
+  },
+
+  async _fetchState(type, state, token, owner, repo) {
     const key = `${type}-${state}`;
     if (isRateLimited) {
       console.warn(`[GitHub] Skipping fetchState(${state}) due to rate-limit`);
@@ -75,7 +110,11 @@ const dataStore = {
         const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
         const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
         if (remaining === 0) {
-          applyRateLimit(resetAt, "issues");
+          applyRateLimit(
+            resetAt,
+            +resp.headers.get("retry-after") || 0,
+            "issues",
+          );
           const disk = loadCache(type, state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
@@ -156,7 +195,11 @@ async function fetchCommentsForIssue(
     const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
     const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
     if (remaining === 0) {
-      applyRateLimit(resetAt, "comments");
+      applyRateLimit(
+        resetAt,
+        +resp.headers.get("retry-after") || 0,
+        "comments",
+      );
       return cache?.data || [];
     }
     if (resp.status === 304) return cache?.data || [];
@@ -194,7 +237,11 @@ async function fetchReviewComments(
     const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
     const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
     if (remaining === 0) {
-      applyRateLimit(resetAt, "comments");
+      applyRateLimit(
+        resetAt,
+        +resp.headers.get("retry-after") || 0,
+        "comments",
+      );
       return cache?.data || [];
     }
     if (resp.status === 304) return cache?.data || [];
