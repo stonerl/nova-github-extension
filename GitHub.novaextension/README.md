@@ -51,9 +51,18 @@ limits.
 
 ## Multiple Accounts (Work & Personal)
 
-The **GitHub Username** and **Repositories** settings can be overridden per
-Nova workspace. Nova reads the workspace value first and falls back to the
-global setting:
+**Automatic detection:** when you open a project that is a GitHub
+checkout, the extension reads its `.git/config` and offers the repo:
+
+- If it belongs to your configured account and is in your Repositories
+  list, it becomes this workspace's active repo automatically.
+- If it belongs to a different account (e.g. a work organization) or is
+  not in your list, a one-time dialog asks whether to use it in this
+  workspace.
+
+The **GitHub Username** and **Repositories** settings can still be
+overridden per Nova workspace manually. Nova reads the workspace value
+first and falls back to the global setting:
 
 1. Open the project that should use a different account.
 2. Go to **Project Settings → Extensions → GitHub**.

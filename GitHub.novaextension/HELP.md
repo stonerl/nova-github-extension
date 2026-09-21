@@ -29,3 +29,10 @@ Tokens are stored per username in the Keychain — paste the matching
 Personal Access Token once per account. The Token field is global-only:
 workspace settings are saved to the project's `.nova` folder and tokens
 are never written there.
+
+### Automatic Repository Detection
+
+When you open a project that is a GitHub checkout, the extension reads
+its `.git/config` and offers the repository it belongs to. If it uses a
+different account than the one configured, a dialog asks first; the
+detected account and repo are then stored for this workspace only.
