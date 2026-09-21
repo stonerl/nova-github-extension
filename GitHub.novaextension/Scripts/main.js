@@ -57,6 +57,8 @@ function flushTokenSave() {
   }
 }
 
+let selectedRepoRow = null; // last repo row picked in the Repositories section
+
 let openView, closedView;
 let openProvider, closedProvider;
 let openPRView, closedPRView;
@@ -215,8 +217,14 @@ exports.activate = function () {
     const selected = items[0];
     // 1) ignore if they clicked nothing—or the separator visual
     if (!selected || selected.contextValue === "separator") {
+      selectedRepoRow = null;
       return;
     }
+
+    // Track the picked row: context commands cannot receive the clicked
+    // TreeItem, so this is how copyUrl/openInBrowser know which repo
+    // the user right-clicked.
+    selectedRepoRow = selected.identifier || null;
 
     const repos = getConfiguredRepos() || [];
     let newRepo = items[0]?.identifier;
@@ -529,8 +537,14 @@ exports.activate = function () {
       }
     }
 
-    // 2) If nothing selected, open the current repo instead
-    const { owner, repo } = loadConfig();
+    // 2) If nothing selected, open the current repo instead — or the
+    //    repo row the user last picked (right-click target)
+    const { owner } = loadConfig();
+    const repos = getConfiguredRepos() || [];
+    const repo =
+      selectedRepoRow && repos.includes(selectedRepoRow)
+        ? selectedRepoRow
+        : loadConfig().repo;
     if (owner && repo) {
       const repoURL = `https://github.com/${owner}/${repo}`;
       console.log("[Command] Opening repository URL:", repoURL);
@@ -555,8 +569,14 @@ exports.activate = function () {
       }
     }
 
-    // 2) Fallback: copy the current repository’s URL
-    const { owner, repo } = loadConfig();
+    // 2) Fallback: copy the current repository's URL — or the repo row
+    //    the user last picked (right-click target)
+    const { owner } = loadConfig();
+    const repos = getConfiguredRepos() || [];
+    const repo =
+      selectedRepoRow && repos.includes(selectedRepoRow)
+        ? selectedRepoRow
+        : loadConfig().repo;
     if (owner && repo) {
       const repoUrl = `https://github.com/${owner}/${repo}`;
       nova.clipboard.writeText(repoUrl);
