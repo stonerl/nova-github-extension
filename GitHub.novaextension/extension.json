@@ -7,7 +7,7 @@
   "license": "MIT License",
   "funding": "https://github.com/sponsors/stonerl",
   "repository": "https://github.com/stonerl/nova-github-extension",
-  "bugs": "https://github.com/stonerl/nova-prettier-github/issues",
+  "bugs": "https://github.com/stonerl/nova-github-extension/issues",
   "categories": ["sidebars", "commands"],
 
   "main": "main.js",

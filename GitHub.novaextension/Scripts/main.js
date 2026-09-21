@@ -99,9 +99,6 @@ const dataStore = {
 
     try {
       while (true) {
-        console.log(
-          `[Fetch] Page ${page} — ${allItems.length}/${maxRecentItems} total so far`,
-        );
         const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=${itemsPerPage}&page=${page}`;
         const headers = {
           Authorization: `token ${token}`,
@@ -140,12 +137,8 @@ const dataStore = {
         }
 
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        console.log(
-          `[Fetch] Page Limit ${itemsPerPage}, Max Recent Items ${maxRecentItems}`,
-        );
         const data = await resp.json();
         allItems = allItems.concat(data);
-        console.log(`[Fetch] Page ${page}, got ${data.length} items`);
         if (data.length < itemsPerPage || allItems.length >= maxRecentItems) {
           break;
         }
@@ -220,23 +213,8 @@ function loadCommentCache(type, number) {
 async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
   const cache = loadCommentCache("issue", issueNumber);
 
-  if (isRateLimited) {
-    console.log(
-      `[Comments] Issue #${issueNumber}: rate-limited, using cached comments (${cache?.data?.length || 0})`,
-    );
-    return cache?.data || [];
-  }
-
-  if (cache?.count === expectedCount) {
-    console.log(
-      `[Comments] Issue #${issueNumber}: using cached comments (expected ${expectedCount}, got ${cache.data.length})`,
-    );
-    return cache.data;
-  }
-
-  console.log(
-    `[Comments] Issue #${issueNumber}: expected ${expectedCount}, cache has ${cache?.count ?? "none"} → fetching from API`,
-  );
+  if (isRateLimited) return cache?.data || [];
+  if (cache?.count === expectedCount) return cache.data;
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
@@ -270,23 +248,8 @@ async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
 async function fetchReviewComments(pullNumber, expectedCount = 0) {
   const cache = loadCommentCache("pull", pullNumber);
 
-  if (isRateLimited) {
-    console.log(
-      `[Comments] Issue #${pullNumber}: rate-limited, using cached comments (${cache?.data?.length || 0})`,
-    );
-    return cache?.data || [];
-  }
-
-  if (cache?.count === expectedCount) {
-    console.log(
-      `[Comments] Issue #${pullNumber}: using cached comments (expected ${expectedCount}, got ${cache.data.length})`,
-    );
-    return cache.data;
-  }
-
-  console.log(
-    `[Comments] Issue #${pullNumber}: expected ${expectedCount}, cache has ${cache?.count ?? "none"} → fetching from API`,
-  );
+  if (isRateLimited) return cache?.data || [];
+  if (cache?.count === expectedCount) return cache.data;
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
@@ -752,11 +715,6 @@ exports.activate = function () {
   nova.commands.register("github-issues.copyUrl", () => {
     // 1) Try to copy the selected issue’s URL
     for (const [section, item] of Object.entries(selectedItems)) {
-      console.log(
-        `[Command] [Copy URL] Section "${section}" selected item:`,
-        item,
-      );
-
       if (item?.issue?.html_url) {
         nova.clipboard.writeText(item.issue.html_url);
         console.log(
@@ -912,7 +870,6 @@ class GitHubIssuesProvider {
     this.rootItems = [];
     this.itemsById = new Map();
     this.itemMap = new WeakMap();
-    this.lastItemIds = new Set();
     this.initialized = false;
 
     // re-fetch if config changes
@@ -931,25 +888,13 @@ class GitHubIssuesProvider {
   }
 
   async refresh(force = false) {
-    return this._refreshInternal(force);
-  }
-
-  async refreshWithData(data) {
-    if (!isConfigReady()) {
+    const { token, owner, repo } = loadConfig();
+    if (!token || !owner || !repo) {
       console.warn(
         `[${this.type}-${this.state}] Missing config (token/owner/repo); skipping refresh`,
       );
       return false;
     }
-    return this._refreshInternal(data, true);
-  }
-
-  async _refreshInternal(force = false) {
-    const { token, owner, repo } = loadConfig();
-    const headers = {
-      Authorization: `token ${token}`,
-      Accept: "application/vnd.github.v3+json",
-    };
 
     let data;
     try {
@@ -964,6 +909,26 @@ class GitHubIssuesProvider {
       console.error(`[${this.type}-${this.state}] cannot load data:`, err);
       return false;
     }
+
+    return this._refreshInternal(data, force);
+  }
+
+  async refreshWithData(data) {
+    if (!isConfigReady()) {
+      console.warn(
+        `[${this.type}-${this.state}] Missing config (token/owner/repo); skipping refresh`,
+      );
+      return false;
+    }
+    return this._refreshInternal(data, true);
+  }
+
+  async _refreshInternal(data, force = false) {
+    const { token, owner, repo } = loadConfig();
+    const headers = {
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github.v3+json",
+    };
 
     // 4) Parse & filter
     const issues =
@@ -1332,22 +1297,6 @@ async function updateIssueState(newState, reason) {
         `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ""}`,
       );
 
-      // Log before patch
-      console.log(
-        "[Patch] Before:",
-        JSON.stringify(
-          {
-            number: root.issue.number,
-            state: root.issue.state,
-            state_reason: root.issue.state_reason,
-            closed_at: root.issue.closed_at,
-            updated_at: root.issue.updated_at,
-          },
-          null,
-          2,
-        ),
-      );
-
       // Patch local model
       root.issue.state = newState;
       root.issue.state_reason = reason ?? null;
@@ -1379,23 +1328,6 @@ async function updateIssueState(newState, reason) {
       toProvider.rootItems.unshift(root);
       toProvider.itemsById.set(String(root.issue.id), root);
 
-      // Log after patch
-      console.log(
-        "[Patch] After:",
-        JSON.stringify(
-          {
-            number: root.issue.number,
-            state: root.issue.state,
-            state_reason: root.issue.state_reason,
-            closed_at: root.issue.closed_at,
-            updated_at: root.issue.updated_at,
-          },
-          null,
-          2,
-        ),
-      );
-
-      // Clear children to force re-render
       // Reload both views to reflect state change
       await openProvider.refreshWithData(dataStore.cache["issue-open"] || []);
       await closedProvider.refreshWithData(
