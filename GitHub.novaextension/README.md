@@ -49,6 +49,21 @@ limits.
 - The extension avoids unnecessary requests and skips fetching if the view is unchanged.
 - Supports both public and private repositories (as long as the token is valid).
 
+## Multiple Accounts (Work & Personal)
+
+The **GitHub Username** and **Repositories** settings can be overridden per
+Nova workspace. Nova reads the workspace value first and falls back to the
+global setting:
+
+1. Open the project that should use a different account.
+2. Go to **Project Settings → Extensions → GitHub**.
+3. Set **GitHub Username** (e.g. your work organization) and the
+   **Repositories** list for that workspace.
+
+Tokens are stored in the macOS Keychain per username, so each account uses
+its own Personal Access Token automatically — paste the matching token once
+per account.
+
 ## 🔒 Privacy
 
 All authentication is handled via your own GitHub token. No external servers or tracking.

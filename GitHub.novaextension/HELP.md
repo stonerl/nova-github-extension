@@ -18,3 +18,12 @@ It will be securely stored using the system Keychain and no longer visible after
 - **Refresh Interval** – How often to auto-refresh data (in minutes).
 - **Items per Page** – The GitHub API pagination size.
 - **Max Recent Items** – Maximum number of issues and PRs to fetch.
+
+### Per-Workspace Settings
+
+**GitHub Username** and **Repositories** can be overridden per project:
+open the project and go to _Project Settings → Extensions → GitHub_.
+The workspace value wins over the global one, so you can use a work
+organization in one project and your personal account in another.
+Tokens are stored per username in the Keychain — paste the matching
+Personal Access Token once per account.
