@@ -1,6 +1,6 @@
 // main.js
 
-const CREDENTIALS_SERVICE = 'github-for-nova';
+const CREDENTIALS_SERVICE = "github-for-nova";
 
 let isRateLimited = false;
 
@@ -9,14 +9,14 @@ function resetRateLimitFlag() {
 }
 
 function getLastRefresh() {
-  return nova.config.get('github.lastRefresh') || 0;
+  return nova.config.get("github.lastRefresh") || 0;
 }
 
 function setLastRefresh(ts) {
   try {
-    nova.config.set('github.lastRefresh', ts);
+    nova.config.set("github.lastRefresh", ts);
   } catch (e) {
-    console.warn('[Config] Failed to record last refresh:', e);
+    console.warn("[Config] Failed to record last refresh:", e);
   }
 }
 
@@ -52,18 +52,18 @@ function cachePath(type, state) {
 function saveCache(type, state, data) {
   const path = cachePath(type, state);
   try {
-    const file = nova.fs.open(path, 'w+t');
+    const file = nova.fs.open(path, "w+t");
     file.write(JSON.stringify(data));
     file.close();
   } catch (e) {
-    console.warn('[Cache] write failed:', e);
+    console.warn("[Cache] write failed:", e);
   }
 }
 
 function loadCache(type, state) {
   const path = cachePath(type, state);
   try {
-    const file = nova.fs.open(path, 'r');
+    const file = nova.fs.open(path, "r");
     const text = file.read();
     file.close();
     return JSON.parse(text);
@@ -78,7 +78,6 @@ const dataStore = {
 
   async fetchState(type, state, token, owner, repo) {
     const key = `${type}-${state}`;
-    if (this.cache[key]) return this.cache[key];
     if (isRateLimited) {
       console.warn(`[GitHub] Skipping fetchState(${state}) due to rate-limit`);
       const disk = loadCache(type, state);
@@ -104,23 +103,23 @@ const dataStore = {
         const url = `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=${itemsPerPage}&page=${page}`;
         const headers = {
           Authorization: `token ${token}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         };
         if (
           this.etags[key] &&
           !etagUsed &&
           maxRecentItems <= itemsPerPage // only safe when not paginating
         ) {
-          headers['If-None-Match'] = this.etags[key];
+          headers["If-None-Match"] = this.etags[key];
           etagUsed = true;
         }
 
         resp = await fetch(url, { headers });
 
-        const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
-        const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+        const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
+        const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
         if (remaining === 0) {
-          applyRateLimit(resetAt, 'issues');
+          applyRateLimit(resetAt, "issues");
           const disk = loadCache(type, state);
           if (disk) {
             this.cache[key] = disk;
@@ -154,14 +153,14 @@ const dataStore = {
 
       allItems = allItems.slice(0, maxRecentItems);
 
-      const etag = resp.headers.get('etag');
+      const etag = resp.headers.get("etag");
       // Only store ETag if present and no pagination was used
       if (
-        resp.headers.has('etag') &&
+        resp.headers.has("etag") &&
         page === 1 &&
         allItems.length <= itemsPerPage
       ) {
-        this.etags[key] = resp.headers.get('etag');
+        this.etags[key] = resp.headers.get("etag");
       } else {
         // Don't overwrite with null if we didn't get a usable one
         this.etags[key] = this.etags[key] ?? null;
@@ -195,7 +194,7 @@ function saveCommentCache(type, number, etag, data) {
   const payload = { etag, data };
   try {
     // again, 'w+t' will create the file if it doesn't exist
-    const file = nova.fs.open(path, 'w+t');
+    const file = nova.fs.open(path, "w+t");
     file.write(JSON.stringify(payload));
     file.close();
   } catch (e) {
@@ -206,7 +205,7 @@ function saveCommentCache(type, number, etag, data) {
 function loadCommentCache(type, number) {
   const path = commentCachePath(type, number);
   try {
-    const file = nova.fs.open(path, 'r');
+    const file = nova.fs.open(path, "r");
     const text = file.read();
     file.close();
     const { etag, data } = JSON.parse(text);
@@ -217,7 +216,7 @@ function loadCommentCache(type, number) {
 }
 
 async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
-  const cache = loadCommentCache('issue', issueNumber);
+  const cache = loadCommentCache("issue", issueNumber);
 
   if (isRateLimited) {
     console.log(
@@ -234,31 +233,31 @@ async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
   }
 
   console.log(
-    `[Comments] Issue #${issueNumber}: expected ${expectedCount}, cache has ${cache?.count ?? 'none'} → fetching from API`,
+    `[Comments] Issue #${issueNumber}: expected ${expectedCount}, cache has ${cache?.count ?? "none"} → fetching from API`,
   );
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
   const headers = {
     Authorization: `token ${token}`,
-    Accept: 'application/vnd.github.v3+json',
+    Accept: "application/vnd.github.v3+json",
   };
-  if (cache?.etag) headers['If-None-Match'] = cache.etag;
+  if (cache?.etag) headers["If-None-Match"] = cache.etag;
 
   try {
     const resp = await fetch(url, { headers });
-    const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
-    const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+    const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
+    const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
     if (remaining === 0) {
-      applyRateLimit(resetAt, 'comments');
+      applyRateLimit(resetAt, "comments");
       return cache?.data || [];
     }
     if (resp.status === 304) return cache?.data || [];
     if (!resp.ok) throw new Error(`Comments fetch HTTP ${resp.status}`);
 
     const data = await resp.json();
-    const etag = resp.headers.get('etag');
-    saveCommentCache('issue', issueNumber, etag, data);
+    const etag = resp.headers.get("etag");
+    saveCommentCache("issue", issueNumber, etag, data);
     return data;
   } catch (err) {
     console.warn(`[Comments] Fetch failed for issue #${issueNumber}:`, err);
@@ -267,7 +266,7 @@ async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
 }
 
 async function fetchReviewComments(pullNumber, expectedCount = 0) {
-  const cache = loadCommentCache('pull', pullNumber);
+  const cache = loadCommentCache("pull", pullNumber);
 
   if (isRateLimited) {
     console.log(
@@ -284,31 +283,31 @@ async function fetchReviewComments(pullNumber, expectedCount = 0) {
   }
 
   console.log(
-    `[Comments] Issue #${pullNumber}: expected ${expectedCount}, cache has ${cache?.count ?? 'none'} → fetching from API`,
+    `[Comments] Issue #${pullNumber}: expected ${expectedCount}, cache has ${cache?.count ?? "none"} → fetching from API`,
   );
 
   const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
   const headers = {
     Authorization: `token ${token}`,
-    Accept: 'application/vnd.github.v3+json',
+    Accept: "application/vnd.github.v3+json",
   };
-  if (cache?.etag) headers['If-None-Match'] = cache.etag;
+  if (cache?.etag) headers["If-None-Match"] = cache.etag;
 
   try {
     const resp = await fetch(url, { headers });
-    const remaining = +resp.headers.get('x-ratelimit-remaining') || 0;
-    const resetAt = +resp.headers.get('x-ratelimit-reset') || 0;
+    const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
+    const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
     if (remaining === 0) {
-      applyRateLimit(resetAt, 'comments');
+      applyRateLimit(resetAt, "comments");
       return cache?.data || [];
     }
     if (resp.status === 304) return cache?.data || [];
     if (!resp.ok) throw new Error(`Review comments fetch HTTP ${resp.status}`);
 
     const data = await resp.json();
-    const etag = resp.headers.get('etag');
-    saveCommentCache('pull', pullNumber, etag, data);
+    const etag = resp.headers.get("etag");
+    saveCommentCache("pull", pullNumber, etag, data);
     return data;
   } catch (err) {
     console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
@@ -323,16 +322,16 @@ let openPRProvider, closedPRProvider;
 
 let selectedItems = {
   issues: null,
-  'closed-issues': null,
+  "closed-issues": null,
   pulls: null,
-  'closed-pulls': null,
+  "closed-pulls": null,
 };
 
 function loadConfig() {
   // 1) Owner is now mandatory
-  const owner = nova.config.get('github.owner');
+  const owner = nova.config.get("github.owner");
   if (!owner) {
-    console.error('[Config] github.owner must be set');
+    console.error("[Config] github.owner must be set");
     return { token: null, owner: null, repo: null /*…*/ };
   }
 
@@ -344,27 +343,27 @@ function loadConfig() {
   if (!token) {
     const defaultToken = nova.credentials.getPassword(
       CREDENTIALS_SERVICE,
-      'default',
+      "default",
     );
     if (defaultToken) {
       nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, defaultToken);
-      nova.credentials.removePassword(CREDENTIALS_SERVICE, 'default');
+      nova.credentials.removePassword(CREDENTIALS_SERVICE, "default");
       token = defaultToken;
       console.log(`[Config] Migrated token from “default” → “${owner}”`);
     }
   }
 
   if (!token) {
-    console.warn('[Config] No GitHub token in Keychain for owner:', owner);
+    console.warn("[Config] No GitHub token in Keychain for owner:", owner);
   }
 
   return {
     token,
     owner,
-    repo: nova.workspace.config.get('github.repo'),
-    refreshInterval: nova.config.get('github.refreshInterval'),
-    maxRecentItems: nova.config.get('github.maxRecentItems'),
-    itemsPerPage: nova.config.get('github.itemsPerPage'),
+    repo: nova.workspace.config.get("github.repo"),
+    refreshInterval: nova.config.get("github.refreshInterval"),
+    maxRecentItems: nova.config.get("github.maxRecentItems"),
+    itemsPerPage: nova.config.get("github.itemsPerPage"),
   };
 }
 
@@ -374,7 +373,7 @@ function isConfigReady() {
 }
 
 function updateContextAvailability() {
-  nova.workspace.context.set('github.ready', isConfigReady());
+  nova.workspace.context.set("github.ready", isConfigReady());
 }
 
 exports.activate = function () {
@@ -390,7 +389,7 @@ exports.activate = function () {
 
     const { refreshInterval } = loadConfig();
     if (!isConfigReady()) {
-      console.warn('[Auto-refresh] Skipped – config incomplete');
+      console.warn("[Auto-refresh] Skipped – config incomplete");
       return;
     }
 
@@ -407,10 +406,10 @@ exports.activate = function () {
 
       const { token, owner, repo } = loadConfig();
       const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
-        dataStore.fetchState('issue', 'open', token, owner, repo),
-        dataStore.fetchState('issue', 'closed', token, owner, repo),
-        dataStore.fetchState('pull', 'open', token, owner, repo),
-        dataStore.fetchState('pull', 'closed', token, owner, repo),
+        dataStore.fetchState("issue", "open", token, owner, repo),
+        dataStore.fetchState("issue", "closed", token, owner, repo),
+        dataStore.fetchState("pull", "open", token, owner, repo),
+        dataStore.fetchState("pull", "closed", token, owner, repo),
       ]);
 
       if (await openProvider.refreshWithData(openIssues)) openView.reload();
@@ -421,7 +420,7 @@ exports.activate = function () {
         closedPRView.reload();
 
       setLastRefresh(now);
-      console.log('[Auto-refresh] Views updated');
+      console.log("[Auto-refresh] Views updated");
     };
 
     // schedule it
@@ -431,12 +430,12 @@ exports.activate = function () {
     doRefresh();
   }
 
-  nova.config.observe('github.refreshInterval', setupAutoRefresh);
+  nova.config.observe("github.refreshInterval", setupAutoRefresh);
   setupAutoRefresh(); // run once immediately
 
-  nova.config.observe('github.maxRecentItems', () => {
+  nova.config.observe("github.maxRecentItems", () => {
     if (!isConfigReady()) {
-      console.warn('[maxRecentItems] Skipped – config incomplete');
+      console.warn("[maxRecentItems] Skipped – config incomplete");
       return;
     }
     if (
@@ -452,10 +451,10 @@ exports.activate = function () {
 
     const { token, owner, repo } = loadConfig();
     Promise.all([
-      dataStore.fetchState('issue', 'open', token, owner, repo),
-      dataStore.fetchState('issue', 'closed', token, owner, repo),
-      dataStore.fetchState('pull', 'open', token, owner, repo),
-      dataStore.fetchState('pull', 'closed', token, owner, repo),
+      dataStore.fetchState("issue", "open", token, owner, repo),
+      dataStore.fetchState("issue", "closed", token, owner, repo),
+      dataStore.fetchState("pull", "open", token, owner, repo),
+      dataStore.fetchState("pull", "closed", token, owner, repo),
     ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
       openProvider
         .refreshWithData(openIssues)
@@ -476,16 +475,16 @@ exports.activate = function () {
   ensureDirExists(cacheDir);
 
   // Instantiate providers
-  openProvider = new GitHubIssuesProvider('open', 'issue');
-  closedProvider = new GitHubIssuesProvider('closed', 'issue');
-  openPRProvider = new GitHubIssuesProvider('open', 'pull');
-  closedPRProvider = new GitHubIssuesProvider('closed', 'pull');
+  openProvider = new GitHubIssuesProvider("open", "issue");
+  closedProvider = new GitHubIssuesProvider("closed", "issue");
+  openPRProvider = new GitHubIssuesProvider("open", "pull");
+  closedPRProvider = new GitHubIssuesProvider("closed", "pull");
 
   // Wire each to its sidebar section
-  openView = new TreeView('issues', { dataProvider: openProvider });
-  closedView = new TreeView('closed-issues', { dataProvider: closedProvider });
-  openPRView = new TreeView('pulls', { dataProvider: openPRProvider });
-  closedPRView = new TreeView('closed-pulls', {
+  openView = new TreeView("issues", { dataProvider: openProvider });
+  closedView = new TreeView("closed-issues", { dataProvider: closedProvider });
+  openPRView = new TreeView("pulls", { dataProvider: openPRProvider });
+  closedPRView = new TreeView("closed-pulls", {
     dataProvider: closedPRProvider,
   });
   nova.subscriptions.add(openView, closedView, openPRView, closedPRView);
@@ -493,41 +492,41 @@ exports.activate = function () {
   let reposView;
   let reposProvider;
   reposProvider = new GitHubRepoProvider();
-  reposView = new TreeView('repos', { dataProvider: reposProvider });
+  reposView = new TreeView("repos", { dataProvider: reposProvider });
   nova.subscriptions.add(reposView);
 
   reposView.onDidChangeSelection((items) => {
     const selected = items[0];
     // 1) ignore if they clicked nothing—or the separator visual
-    if (!selected || selected.contextValue === 'separator') {
+    if (!selected || selected.contextValue === "separator") {
       return;
     }
 
-    const repos = nova.config.get('github.repos') || [];
+    const repos = nova.config.get("github.repos") || [];
     let newRepo = items[0]?.identifier;
 
     // if they didn’t actually pick one (or it’s no longer in the list),
     // default back to the very first repo
     if (!newRepo || !repos.includes(newRepo)) {
       if (repos.length === 0) {
-        console.warn('[RepoSelect] No repos configured, nothing to do.');
+        console.warn("[RepoSelect] No repos configured, nothing to do.");
         return;
       }
       newRepo = repos[0];
-      nova.workspace.config.set('github.repo', newRepo);
+      nova.workspace.config.set("github.repo", newRepo);
       console.log(
         `[RepoSelect] No valid selection → defaulting to "${newRepo}"`,
       );
     }
 
-    const currentRepo = nova.workspace.config.get('github.repo');
+    const currentRepo = nova.workspace.config.get("github.repo");
     if (newRepo === currentRepo) {
       console.log(`[RepoSelect] Repo "${newRepo}" is already selected.`);
       return;
     }
 
     console.log(`[RepoSelect] Switching repo to "${newRepo}"`);
-    nova.workspace.config.set('github.repo', newRepo);
+    nova.workspace.config.set("github.repo", newRepo);
 
     // Clear selection
     Object.keys(selectedItems).forEach((k) => (selectedItems[k] = null));
@@ -549,16 +548,16 @@ exports.activate = function () {
     // Delay to let workspace config observers update
     setTimeout(() => {
       if (!isConfigReady()) {
-        console.warn('[RepoSelect] Skipped fetch – config incomplete');
+        console.warn("[RepoSelect] Skipped fetch – config incomplete");
         return;
       }
 
       const { token, owner, repo } = loadConfig(); // repo is now up to date
       Promise.all([
-        dataStore.fetchState('issue', 'open', token, owner, repo),
-        dataStore.fetchState('issue', 'closed', token, owner, repo),
-        dataStore.fetchState('pull', 'open', token, owner, repo),
-        dataStore.fetchState('pull', 'closed', token, owner, repo),
+        dataStore.fetchState("issue", "open", token, owner, repo),
+        dataStore.fetchState("issue", "closed", token, owner, repo),
+        dataStore.fetchState("pull", "open", token, owner, repo),
+        dataStore.fetchState("pull", "closed", token, owner, repo),
       ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
         openProvider
           .refreshWithData(openIssues)
@@ -578,26 +577,26 @@ exports.activate = function () {
     reposView.reload();
   });
 
-  nova.config.observe('github.repos', () => {
+  nova.config.observe("github.repos", () => {
     reposProvider.updateRepoList(); // your method to update the internal list
     reposView.reload(); // tell Nova to repaint the UI
   });
 
   // inside exports.activate(), before you call updateContextAvailability():
-  nova.config.observe('github.token', (newValue) => {
-    const owner = nova.config.get('github.owner') || 'default';
-    if (newValue === '') {
+  nova.config.observe("github.token", (newValue) => {
+    const owner = nova.config.get("github.owner") || "default";
+    if (newValue === "") {
       nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
-      console.log('[Config] GitHub token removed from Keychain');
-    } else if (newValue && newValue !== '***') {
-      const owner = nova.config.get('github.owner') || 'default';
+      console.log("[Config] GitHub token removed from Keychain");
+    } else if (newValue && newValue !== "***") {
+      const owner = nova.config.get("github.owner") || "default";
       try {
         nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, newValue);
         // mask the setting so it never stays in cleartext
-        nova.config.set('github.token', '***');
-        console.log('[Config] GitHub token moved to Keychain');
+        nova.config.set("github.token", "***");
+        console.log("[Config] GitHub token moved to Keychain");
       } catch (err) {
-        console.error('[Config] Failed to save token to Keychain:', err);
+        console.error("[Config] Failed to save token to Keychain:", err);
       }
     }
   });
@@ -609,20 +608,20 @@ exports.activate = function () {
   }
 
   openView.onDidChangeSelection((items) => {
-    selectedItems['issues'] = items[0] || null;
-    clearOtherSelections('issues');
+    selectedItems["issues"] = items[0] || null;
+    clearOtherSelections("issues");
   });
   closedView.onDidChangeSelection((items) => {
-    selectedItems['closed-issues'] = items[0] || null;
-    clearOtherSelections('closed-issues');
+    selectedItems["closed-issues"] = items[0] || null;
+    clearOtherSelections("closed-issues");
   });
   openPRView.onDidChangeSelection((items) => {
-    selectedItems['pulls'] = items[0] || null;
-    clearOtherSelections('pulls');
+    selectedItems["pulls"] = items[0] || null;
+    clearOtherSelections("pulls");
   });
   closedPRView.onDidChangeSelection((items) => {
-    selectedItems['closed-pulls'] = items[0] || null;
-    clearOtherSelections('closed-pulls');
+    selectedItems["closed-pulls"] = items[0] || null;
+    clearOtherSelections("closed-pulls");
   });
 
   // 3) Initial load (only if it’s been longer than a full interval)
@@ -637,10 +636,10 @@ exports.activate = function () {
         )}s since last — loading from cache instead`,
       );
       // load whatever’s on disk and populate the views
-      const cachedOpenIssues = loadCache('issue', 'open') || [];
-      const cachedClosedIssues = loadCache('issue', 'closed') || [];
-      const cachedOpenPRs = loadCache('pull', 'open') || [];
-      const cachedClosedPRs = loadCache('pull', 'closed') || [];
+      const cachedOpenIssues = loadCache("issue", "open") || [];
+      const cachedClosedIssues = loadCache("issue", "closed") || [];
+      const cachedOpenPRs = loadCache("pull", "open") || [];
+      const cachedClosedPRs = loadCache("pull", "closed") || [];
 
       await openProvider.refreshWithData(cachedOpenIssues);
       await closedProvider.refreshWithData(cachedClosedIssues);
@@ -655,16 +654,16 @@ exports.activate = function () {
     }
 
     if (!isConfigReady()) {
-      console.warn('[Initial Load] Skipped – config incomplete');
+      console.warn("[Initial Load] Skipped – config incomplete");
       return;
     }
 
     const { token, owner, repo } = loadConfig();
     const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
-      dataStore.fetchState('issue', 'open', token, owner, repo),
-      dataStore.fetchState('issue', 'closed', token, owner, repo),
-      dataStore.fetchState('pull', 'open', token, owner, repo),
-      dataStore.fetchState('pull', 'closed', token, owner, repo),
+      dataStore.fetchState("issue", "open", token, owner, repo),
+      dataStore.fetchState("issue", "closed", token, owner, repo),
+      dataStore.fetchState("pull", "open", token, owner, repo),
+      dataStore.fetchState("pull", "closed", token, owner, repo),
     ]);
 
     if (await openProvider.refreshWithData(openIssues)) openView.reload();
@@ -678,17 +677,17 @@ exports.activate = function () {
   })();
 
   // 4) “Refresh” runs both
-  nova.commands.register('github-issues.refresh', async () => {
+  nova.commands.register("github-issues.refresh", async () => {
     if (!isConfigReady()) {
-      console.warn('[Command: Refresh] Skipped – config incomplete');
+      console.warn("[Command: Refresh] Skipped – config incomplete");
       return;
     }
     const { token, owner, repo } = loadConfig();
     const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
-      dataStore.fetchState('issue', 'open', token, owner, repo),
-      dataStore.fetchState('issue', 'closed', token, owner, repo),
-      dataStore.fetchState('pull', 'open', token, owner, repo),
-      dataStore.fetchState('pull', 'closed', token, owner, repo),
+      dataStore.fetchState("issue", "open", token, owner, repo),
+      dataStore.fetchState("issue", "closed", token, owner, repo),
+      dataStore.fetchState("pull", "open", token, owner, repo),
+      dataStore.fetchState("pull", "closed", token, owner, repo),
     ]);
 
     if (await openProvider.refreshWithData(openIssues)) openView.reload();
@@ -698,29 +697,29 @@ exports.activate = function () {
       closedPRView.reload();
   });
 
-  nova.commands.register('github-issues.newIssue', () => {
+  nova.commands.register("github-issues.newIssue", () => {
     const { owner, repo } = loadConfig();
     if (!owner || !repo) {
-      console.warn('[NewIssue] Missing owner/repo in config');
+      console.warn("[NewIssue] Missing owner/repo in config");
       return;
     }
     const url = `https://github.com/${owner}/${repo}/issues/new`;
-    console.log('[NewIssue] Opening:', url);
+    console.log("[NewIssue] Opening:", url);
     nova.openURL(url);
   });
 
-  nova.commands.register('github-issues.newPullRequest', () => {
+  nova.commands.register("github-issues.newPullRequest", () => {
     const { owner, repo } = loadConfig();
     if (!owner || !repo) {
-      console.warn('[NewPullRequest] Missing owner/repo in config');
+      console.warn("[NewPullRequest] Missing owner/repo in config");
       return;
     }
     const url = `https://github.com/${owner}/${repo}/compare`;
-    console.log('[NewPullRequest] Opening:', url);
+    console.log("[NewPullRequest] Opening:", url);
     nova.openURL(url);
   });
 
-  nova.commands.register('github-issues.openInBrowser', () => {
+  nova.commands.register("github-issues.openInBrowser", () => {
     // 1) Try to open the selected issue or comment
     for (const item of Object.values(selectedItems)) {
       const url =
@@ -730,7 +729,7 @@ exports.activate = function () {
         item?.issue?.url;
 
       if (url) {
-        console.log('[Command] Opening URL:', url);
+        console.log("[Command] Opening URL:", url);
         nova.openURL(url);
         return;
       }
@@ -740,16 +739,16 @@ exports.activate = function () {
     const { owner, repo } = loadConfig();
     if (owner && repo) {
       const repoURL = `https://github.com/${owner}/${repo}`;
-      console.log('[Command] Opening repository URL:', repoURL);
+      console.log("[Command] Opening repository URL:", repoURL);
       nova.openURL(repoURL);
     } else {
       console.warn(
-        '[Command] No valid issue/comment selected and no repo configured.',
+        "[Command] No valid issue/comment selected and no repo configured.",
       );
     }
   });
 
-  nova.commands.register('github-issues.copyUrl', () => {
+  nova.commands.register("github-issues.copyUrl", () => {
     // 1) Try to copy the selected issue’s URL
     for (const [section, item] of Object.entries(selectedItems)) {
       console.log(
@@ -760,7 +759,7 @@ exports.activate = function () {
       if (item?.issue?.html_url) {
         nova.clipboard.writeText(item.issue.html_url);
         console.log(
-          '[Command] Issue URL copied to clipboard:',
+          "[Command] Issue URL copied to clipboard:",
           item.issue.html_url,
         );
         return;
@@ -772,29 +771,29 @@ exports.activate = function () {
     if (owner && repo) {
       const repoUrl = `https://github.com/${owner}/${repo}`;
       nova.clipboard.writeText(repoUrl);
-      console.log('[Command] Repository URL copied to clipboard:', repoUrl);
+      console.log("[Command] Repository URL copied to clipboard:", repoUrl);
       return;
     }
 
     // 3) Nothing to copy
     console.warn(
-      '[Command] No issue selected and no repository configured; nothing to copy.',
+      "[Command] No issue selected and no repository configured; nothing to copy.",
     );
   });
 
-  nova.commands.register('github-issues.closeIssue', async () => {
-    await updateIssueState('closed', undefined);
+  nova.commands.register("github-issues.closeIssue", async () => {
+    await updateIssueState("closed", undefined);
   });
 
-  nova.commands.register('github-issues.closeNotPlanned', async () => {
-    await updateIssueState('closed', 'not_planned');
+  nova.commands.register("github-issues.closeNotPlanned", async () => {
+    await updateIssueState("closed", "not_planned");
   });
-  nova.commands.register('github-issues.closeDuplicate', async () => {
-    await updateIssueState('closed', 'duplicate');
+  nova.commands.register("github-issues.closeDuplicate", async () => {
+    await updateIssueState("closed", "duplicate");
   });
 
-  nova.commands.register('github-issues.reopenIssue', async () => {
-    await updateIssueState('open');
+  nova.commands.register("github-issues.reopenIssue", async () => {
+    await updateIssueState("open");
   });
 
   // 5) When switching back to either view, re-fetch
@@ -817,7 +816,7 @@ exports.deactivate = function () {
 };
 
 function hexToRgb(hex) {
-  if (!hex || typeof hex !== 'string') return null;
+  if (!hex || typeof hex !== "string") return null;
   const match = hex.match(/^#?([a-f\d]{6})$/i);
   if (!match) return null;
   const intVal = parseInt(match[1], 16);
@@ -844,16 +843,16 @@ class GitHubRepoProvider {
 
   updateRepoList() {
     // 1) load all repos from config
-    const repos = nova.config.get('github.repos') || [];
+    const repos = nova.config.get("github.repos") || [];
 
     // 2) figure out the “current” repo
-    let currentRepo = nova.workspace.config.get('github.repo');
+    let currentRepo = nova.workspace.config.get("github.repo");
 
     // 3) if none is set or it’s not in the list, pick the first one
     if (!currentRepo || !repos.includes(currentRepo)) {
       if (repos.length > 0) {
         currentRepo = repos[0];
-        nova.workspace.config.set('github.repo', currentRepo);
+        nova.workspace.config.set("github.repo", currentRepo);
         console.log(
           `[RepoSelect] No valid current repo, defaulting to "${currentRepo}"`,
         );
@@ -866,14 +865,14 @@ class GitHubRepoProvider {
     if (currentRepo) {
       const current = new TreeItem(currentRepo, TreeItemCollapsibleState.None);
       current.identifier = currentRepo;
-      current.contextValue = 'repo-item';
-      current.image = 'sidebar-small';
+      current.contextValue = "repo-item";
+      current.image = "sidebar-small";
       items.push(current);
 
       // Add separator
-      const separator = new TreeItem('', TreeItemCollapsibleState.None);
-      separator.contextValue = 'separator';
-      (separator.image = '__builtin.remove'), items.push(separator);
+      const separator = new TreeItem("", TreeItemCollapsibleState.None);
+      separator.contextValue = "separator";
+      ((separator.image = "__builtin.remove"), items.push(separator));
     }
 
     // 5) Add all other repos except the current one
@@ -881,8 +880,8 @@ class GitHubRepoProvider {
     for (const name of remaining) {
       const item = new TreeItem(name, TreeItemCollapsibleState.None);
       item.identifier = name;
-      item.contextValue = 'repo-item';
-      item.image = 'code_branch';
+      item.contextValue = "repo-item";
+      item.image = "code_branch";
       items.push(item);
     }
 
@@ -903,7 +902,7 @@ class GitHubRepoProvider {
 }
 
 class GitHubIssuesProvider {
-  constructor(state, type = 'issue') {
+  constructor(state, type = "issue") {
     this.state = state; // 'open' or 'closed'
     this.type = type; // 'issue' or 'pull'
     this.rootItems = [];
@@ -912,7 +911,7 @@ class GitHubIssuesProvider {
     this.initialized = false;
 
     // re-fetch if config changes
-    for (const key of ['github.token', 'github.owner']) {
+    for (const key of ["github.token", "github.owner"]) {
       nova.config.observe(key, () => {
         updateContextAvailability();
         if (isConfigReady()) this.refresh(true);
@@ -920,7 +919,7 @@ class GitHubIssuesProvider {
     }
 
     // Handle workspace config separately
-    nova.workspace.config.observe('github.repo', () => {
+    nova.workspace.config.observe("github.repo", () => {
       updateContextAvailability();
       if (isConfigReady()) this.refresh(true);
     });
@@ -944,7 +943,7 @@ class GitHubIssuesProvider {
     const { token, owner, repo } = loadConfig();
     const headers = {
       Authorization: `token ${token}`,
-      Accept: 'application/vnd.github.v3+json',
+      Accept: "application/vnd.github.v3+json",
     };
 
     let data;
@@ -963,7 +962,7 @@ class GitHubIssuesProvider {
 
     // 4) Parse & filter
     const issues =
-      this.type === 'issue'
+      this.type === "issue"
         ? data.filter((i) => !i.pull_request)
         : data.filter((i) => !!i.pull_request);
 
@@ -988,7 +987,7 @@ class GitHubIssuesProvider {
     this.rootItems = await Promise.all(
       issues.map(async (i) => {
         // 6a) Hydrate PR fields *before* creating the node
-        if (this.type === 'pull') {
+        if (this.type === "pull") {
           const originalComments = i.comments;
           const pullResp = await fetch(
             `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
@@ -1012,18 +1011,18 @@ class GitHubIssuesProvider {
 
         // 6c) Standard children (state, dates, author, assignees, milestone, labels)
         // – show reopen/close reason
-        if (i.state_reason === 'reopened') {
+        if (i.state_reason === "reopened") {
           const reasonItem = new IssueItem({
-            title: 'Reopened',
-            image: 'issue_reopened',
+            title: "Reopened",
+            image: "issue_reopened",
           });
           reasonItem.parent = parent;
           parent.children.push(reasonItem);
-        } else if (i.state === 'closed' && i.state_reason) {
+        } else if (i.state === "closed" && i.state_reason) {
           const map = {
-            completed: { text: 'Completed', image: 'issue_completed' },
-            not_planned: { text: 'Not Planned', image: 'issue_not_planned' },
-            duplicate: { text: 'Duplicate', image: 'issue_not_planned' },
+            completed: { text: "Completed", image: "issue_completed" },
+            not_planned: { text: "Not Planned", image: "issue_not_planned" },
+            duplicate: { text: "Duplicate", image: "issue_not_planned" },
           };
           const r = map[i.state_reason] || { text: i.state_reason };
           const reasonItem = new IssueItem({ title: r.text, image: r.image });
@@ -1032,52 +1031,52 @@ class GitHubIssuesProvider {
         }
 
         // – creation & update timestamps
-        const isClosed = i.state === 'closed';
+        const isClosed = i.state === "closed";
 
         if (isClosed && i.closed_at) {
           const closedAt = new IssueItem({
-            title: 'Closed',
+            title: "Closed",
             body: new Date(i.closed_at).toLocaleString(),
-            image: ['not_planned', 'duplicate'].includes(i.state_reason)
-              ? 'pr_closed'
-              : 'issue_closed',
+            image: ["not_planned", "duplicate"].includes(i.state_reason)
+              ? "pr_closed"
+              : "issue_closed",
           });
           closedAt.parent = parent;
           parent.children.push(closedAt);
         } else {
           const createdAt = new IssueItem({
-            title: 'Created',
+            title: "Created",
             body: new Date(i.created_at).toLocaleString(),
-            image: 'issue_created',
+            image: "issue_created",
           });
           createdAt.parent = parent;
           parent.children.push(createdAt);
 
           if (i.updated_at !== i.created_at) {
             const updatedAt = new IssueItem({
-              title: 'Updated',
+              title: "Updated",
               body: new Date(i.updated_at).toLocaleString(),
-              image: 'issue_updated',
+              image: "issue_updated",
             });
             updatedAt.parent = parent;
             parent.children.push(updatedAt);
           }
         }
 
-        if (this.type === 'pull') {
+        if (this.type === "pull") {
           if (i.merged_at) {
             const merged = new IssueItem({
-              title: 'Merged',
+              title: "Merged",
               body: new Date(i.merged_at).toLocaleString(),
-              image: 'issue_closed',
+              image: "issue_closed",
             });
             merged.parent = parent;
             parent.children.push(merged);
           } else if (isClosed) {
             const prClosed = new IssueItem({
-              title: 'Closed',
+              title: "Closed",
               body: new Date(i.closed_at).toLocaleString(),
-              image: 'pr_closed',
+              image: "pr_closed",
             });
             prClosed.parent = parent;
             parent.children.push(prClosed);
@@ -1087,9 +1086,9 @@ class GitHubIssuesProvider {
         // – author
         if (i.user?.login) {
           const author = new IssueItem({
-            title: 'Author',
+            title: "Author",
             body: i.user.login,
-            image: 'author',
+            image: "author",
           });
           author.parent = parent;
           parent.children.push(author);
@@ -1103,9 +1102,9 @@ class GitHubIssuesProvider {
             : [];
         for (const a of assignees) {
           const asn = new IssueItem({
-            title: 'Assignee',
+            title: "Assignee",
             body: a.login,
-            image: 'assignee',
+            image: "assignee",
           });
           asn.parent = parent;
           parent.children.push(asn);
@@ -1114,7 +1113,7 @@ class GitHubIssuesProvider {
         // – milestone
         if (i.milestone?.title) {
           const ms = new IssueItem({
-            title: 'Milestone',
+            title: "Milestone",
             body: i.milestone.title,
           });
           ms.parent = parent;
@@ -1139,7 +1138,7 @@ class GitHubIssuesProvider {
             : [];
 
         const reviewComments =
-          this.type === 'pull' && i.review_comments > 0
+          this.type === "pull" && i.review_comments > 0
             ? await fetchReviewComments(i.number, i.review_comments)
             : [];
         const allComments = [...comments, ...reviewComments];
@@ -1152,9 +1151,9 @@ class GitHubIssuesProvider {
         );*/
         if (allComments.length > 0) {
           const group = new IssueItem({
-            title: 'Comments',
+            title: "Comments",
             body: `(${allComments.length})`,
-            image: 'comments',
+            image: "comments",
           });
           group.parent = parent;
 
@@ -1162,26 +1161,26 @@ class GitHubIssuesProvider {
             const commentDate = new Date(c.created_at).toLocaleString();
 
             const lines = c.body.split(/\r?\n/);
-            const firstLine = lines.find((l) => l.trim() !== '') || '';
+            const firstLine = lines.find((l) => l.trim() !== "") || "";
 
             // build a tooltip of up to 25 lines
             const allLines = c.body.split(/\r?\n/);
             const snippet = allLines.slice(0, 20);
-            if (allLines.length > 20) snippet.push('…');
+            if (allLines.length > 20) snippet.push("…");
 
             // Trim leading/trailing empty lines
-            while (snippet.length && snippet[0].trim() === '') snippet.shift();
-            while (snippet.length && snippet[snippet.length - 1].trim() === '')
+            while (snippet.length && snippet[0].trim() === "") snippet.shift();
+            while (snippet.length && snippet[snippet.length - 1].trim() === "")
               snippet.pop();
 
-            const tooltipBody = snippet.join('\n');
-            const author = c.user?.login || 'unknown';
+            const tooltipBody = snippet.join("\n");
+            const author = c.user?.login || "unknown";
             const tooltip = `${author} on ${commentDate}:\n\n${tooltipBody}`;
 
             const date = new Date(c.created_at);
             const shortDate = date.toLocaleDateString(undefined, {
-              month: 'short',
-              day: 'numeric',
+              month: "short",
+              day: "numeric",
             }); // “Apr 2”
             const title = `${author} on ${shortDate}`;
 
@@ -1189,10 +1188,10 @@ class GitHubIssuesProvider {
               title,
               body: firstLine,
               tooltip,
-              image: 'comment',
+              image: "comment",
               url: c.html_url,
             });
-            item.contextValue = 'comment';
+            item.contextValue = "comment";
             item.parent = group;
             group.children.push(item);
           }
@@ -1226,27 +1225,27 @@ class GitHubIssuesProvider {
         : TreeItemCollapsibleState.None,
     );
     if (issue.id) {
-      const isDraft = this.type === 'pull' && issue.draft === true;
+      const isDraft = this.type === "pull" && issue.draft === true;
 
       item.identifier = issue.id;
-      item.contextValue = 'issue-root';
+      item.contextValue = "issue-root";
       item.name = isDraft ? `#${issue.number} [DRAFT]` : `#${issue.number}`;
       item.descriptiveText = issue.title;
 
       if (issue.body && issue.body.trim()) {
         item.tooltip = issue.body;
       } else {
-        item.tooltip = 'No description provided.';
+        item.tooltip = "No description provided.";
       }
 
       const reason = issue.state_reason;
       if (isDraft) {
         item.color = Color.rgb(140 / 255, 140 / 255, 140 / 255); // muted gray
-      } else if (this.state === 'open' || reason === 'reopened') {
+      } else if (this.state === "open" || reason === "reopened") {
         item.color = Color.rgb(45 / 255, 164 / 255, 78 / 255); // GitHub open green
       } else {
         // it's closed — check state_reason
-        if (reason === 'not_planned' || reason === 'duplicate') {
+        if (reason === "not_planned" || reason === "duplicate") {
           item.color = Color.rgb(110 / 255, 119 / 255, 129 / 255); // GitHub gray
         } else {
           item.color = Color.rgb(130 / 255, 80 / 255, 223 / 255); // GitHub purple
@@ -1280,7 +1279,7 @@ async function waitForIssueState(issueNumber, desiredState, maxRetries = 10) {
     const resp = await fetch(url, {
       headers: {
         Authorization: `token ${token}`,
-        Accept: 'application/vnd.github.v3+json',
+        Accept: "application/vnd.github.v3+json",
       },
     });
     if (!resp.ok) {
@@ -1311,7 +1310,7 @@ async function updateIssueState(newState, reason) {
 
     // walk up until we find an item with a numeric issue.number
     let root = item;
-    while (root && typeof root.issue?.number !== 'number') {
+    while (root && typeof root.issue?.number !== "number") {
       root = root.parent;
     }
     if (!root) continue;
@@ -1320,12 +1319,12 @@ async function updateIssueState(newState, reason) {
     const { token, owner, repo } = loadConfig();
     const issueNumber = root.issue.number;
 
-    if (newState === 'open') {
-      reason = 'reopened';
+    if (newState === "open") {
+      reason = "reopened";
     }
 
-    if (newState === 'closed' && !reason) {
-      reason = 'completed';
+    if (newState === "closed" && !reason) {
+      reason = "completed";
     }
 
     const body = { state: newState };
@@ -1334,11 +1333,11 @@ async function updateIssueState(newState, reason) {
     const resp = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
       {
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
           Authorization: `token ${token}`,
-          Accept: 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json',
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
       },
@@ -1346,12 +1345,12 @@ async function updateIssueState(newState, reason) {
 
     if (resp.ok) {
       console.log(
-        `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ''}`,
+        `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ""}`,
       );
 
       // Log before patch
       console.log(
-        '[Patch] Before:',
+        "[Patch] Before:",
         JSON.stringify(
           {
             number: root.issue.number,
@@ -1369,12 +1368,12 @@ async function updateIssueState(newState, reason) {
       root.issue.state = newState;
       root.issue.state_reason = reason ?? null;
       root.issue.closed_at =
-        newState === 'closed' ? new Date().toISOString() : null;
+        newState === "closed" ? new Date().toISOString() : null;
       root.issue.updated_at = new Date().toISOString();
 
       // Move in cache
-      const type = 'issue';
-      const keyFrom = `${type}-${newState === 'closed' ? 'open' : 'closed'}`;
+      const type = "issue";
+      const keyFrom = `${type}-${newState === "closed" ? "open" : "closed"}`;
       const keyTo = `${type}-${newState}`;
 
       dataStore.cache[keyFrom] = (dataStore.cache[keyFrom] || []).filter(
@@ -1383,8 +1382,8 @@ async function updateIssueState(newState, reason) {
       dataStore.cache[keyTo] = [root.issue, ...(dataStore.cache[keyTo] || [])];
 
       const fromProvider =
-        newState === 'closed' ? openProvider : closedProvider;
-      const toProvider = newState === 'closed' ? closedProvider : openProvider;
+        newState === "closed" ? openProvider : closedProvider;
+      const toProvider = newState === "closed" ? closedProvider : openProvider;
 
       // Remove from old provider's list
       fromProvider.rootItems = fromProvider.rootItems.filter(
@@ -1398,7 +1397,7 @@ async function updateIssueState(newState, reason) {
 
       // Log after patch
       console.log(
-        '[Patch] After:',
+        "[Patch] After:",
         JSON.stringify(
           {
             number: root.issue.number,
@@ -1414,9 +1413,9 @@ async function updateIssueState(newState, reason) {
 
       // Clear children to force re-render
       // Reload both views to reflect state change
-      await openProvider.refreshWithData(dataStore.cache['issue-open'] || []);
+      await openProvider.refreshWithData(dataStore.cache["issue-open"] || []);
       await closedProvider.refreshWithData(
-        dataStore.cache['issue-closed'] || [],
+        dataStore.cache["issue-closed"] || [],
       );
       openView.reload();
       closedView.reload();

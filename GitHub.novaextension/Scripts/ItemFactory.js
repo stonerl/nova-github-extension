@@ -1,6 +1,6 @@
 // ItemFactory.js
-import IssueItem from './IssueItem.js'
-import PullRequestItem from './PullRequestItem.js'
+import IssueItem from "./IssueItem.js";
+import PullRequestItem from "./PullRequestItem.js";
 
 /**
  * Builds list of IssueItem or PullRequestItem instances from raw GitHub data.
@@ -14,21 +14,19 @@ export async function buildItems(
   rawItems,
   type,
   fetchComments,
-  fetchReviewComments
+  fetchReviewComments,
 ) {
-  const ItemClass = type === 'issue'
-    ? IssueItem
-    : PullRequestItem
+  const ItemClass = type === "issue" ? IssueItem : PullRequestItem;
 
-  const items = []
+  const items = [];
   for (const raw of rawItems) {
-    const item = new ItemClass(raw)
-    if (type === 'issue') {
-      await item.buildChildren(fetchComments)
+    const item = new ItemClass(raw);
+    if (type === "issue") {
+      await item.buildChildren(fetchComments);
     } else {
-      await item.buildChildren(fetchComments, fetchReviewComments)
+      await item.buildChildren(fetchComments, fetchReviewComments);
     }
-    items.push(item)
+    items.push(item);
   }
-  return items
+  return items;
 }
