@@ -16,6 +16,30 @@ const { GitHubRepoProvider } = require("./lib/tree/repo-provider.js");
 
 let refreshTimer = null;
 
+// Debounced token persistence: Nova commits settings fields on every
+// keystroke, and each config read/write crosses into the app process —
+// bursts can lock up Nova's config bridge. Coalesce into one write.
+let tokenSaveTimer = null;
+let tokenSavePayload = null; // { owner, token }
+
+function flushTokenSave() {
+  if (tokenSaveTimer) {
+    clearTimeout(tokenSaveTimer);
+    tokenSaveTimer = null;
+  }
+  if (!tokenSavePayload) return;
+  const { owner, token } = tokenSavePayload;
+  tokenSavePayload = null;
+  try {
+    nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, token);
+    // mask the setting so it never stays in cleartext
+    nova.config.set("github.token", "***");
+    console.log("[Config] GitHub token moved to Keychain");
+  } catch (err) {
+    console.error("[Config] Failed to save token to Keychain:", err);
+  }
+}
+
 let openView, closedView;
 let openProvider, closedProvider;
 let openPRView, closedPRView;
@@ -233,22 +257,26 @@ exports.activate = function () {
   };
   nova.config.observe("github.repos", updateRepoViews);
   nova.workspace.config.observe("github.repos", updateRepoViews);
-
   // Move the token from the settings field into the Keychain
   nova.config.observe("github.token", (newValue) => {
     const owner = nova.workspace.config.get("github.owner") || "default";
     if (newValue === "") {
+      // cancel any pending save, then remove immediately
+      if (tokenSaveTimer) {
+        clearTimeout(tokenSaveTimer);
+        tokenSaveTimer = null;
+        tokenSavePayload = null;
+      }
       nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
       console.log("[Config] GitHub token removed from Keychain");
-    } else if (newValue && newValue !== "***") {
-      try {
-        nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, newValue);
-        // mask the setting so it never stays in cleartext
-        nova.config.set("github.token", "***");
-        console.log("[Config] GitHub token moved to Keychain");
-      } catch (err) {
-        console.error("[Config] Failed to save token to Keychain:", err);
-      }
+    } else if (
+      typeof newValue === "string" &&
+      newValue.length >= 20 && // plausible token; ignore partial edits
+      newValue !== "***"
+    ) {
+      tokenSavePayload = { owner, token: newValue };
+      if (tokenSaveTimer) clearTimeout(tokenSaveTimer);
+      tokenSaveTimer = setTimeout(flushTokenSave, 250);
     }
   });
 
@@ -458,6 +486,7 @@ exports.activate = function () {
 };
 
 exports.deactivate = function () {
+  flushTokenSave();
   if (refreshTimer) {
     clearInterval(refreshTimer);
     refreshTimer = null;
