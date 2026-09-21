@@ -43,6 +43,14 @@ function readSetting(key) {
   return readScoped(nova.config, key);
 }
 
+// Enum settings come back as strings ("50"); numeric coercion keeps
+// comparisons like maxRecentItems <= itemsPerPage working so ETag
+// revalidation stays enabled.
+function toNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function loadConfig() {
   const now = Date.now();
   if (configCache && now - configCacheAt < CONFIG_CACHE_TTL) {
@@ -87,9 +95,9 @@ function loadConfig() {
       token,
       owner,
       repo: nova.workspace.config.get("github.repo"),
-      refreshInterval: nova.config.get("github.refreshInterval"),
-      maxRecentItems: nova.config.get("github.maxRecentItems"),
-      itemsPerPage: nova.config.get("github.itemsPerPage"),
+      refreshInterval: toNumber(nova.config.get("github.refreshInterval"), 30),
+      maxRecentItems: toNumber(nova.config.get("github.maxRecentItems"), 50),
+      itemsPerPage: toNumber(nova.config.get("github.itemsPerPage"), 100),
     };
   }
 
