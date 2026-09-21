@@ -1,0 +1,44 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert");
+const { createNovaStub } = require("./helpers/nova-stub.js");
+const { freshRequire } = require("./helpers/modules.js");
+
+function setup() {
+  const stub = createNovaStub({ globalValues: { "github.owner": "stonerl" } });
+  stub.install();
+  return freshRequire("lib/cache.js");
+}
+
+test("mkdir is attempted once per directory across many accesses", () => {
+  const cache = setup();
+  for (let i = 0; i < 100; i++) cache.loadCommentCache("issue", i, "o", "r");
+  for (let i = 0; i < 50; i++) cache.loadCache("open", "o", "r");
+  assert.equal(global.__stub.captures.mkdirAttempts, 1);
+});
+
+test("save/load round-trip", () => {
+  const cache = setup();
+  cache.saveCache("open", [{ id: 1 }], "o", "r");
+  assert.deepEqual(cache.loadCache("open", "o", "r"), [{ id: 1 }]);
+});
+
+test("missing files degrade to null / empty comment cache", () => {
+  const cache = setup();
+  assert.equal(cache.loadCache("open", "o", "r"), null);
+  assert.deepEqual(cache.loadCommentCache("issue", 7, "o", "r"), {
+    etag: null,
+    data: [],
+    count: 0,
+  });
+});
+
+test("comment cache stores etag + data + count", () => {
+  const cache = setup();
+  cache.saveCommentCache("issue", 7, '"etag1"', [{ id: 9 }], "o", "r");
+  const loaded = cache.loadCommentCache("issue", 7, "o", "r");
+  assert.equal(loaded.etag, '"etag1"');
+  assert.equal(loaded.count, 1);
+  assert.deepEqual(loaded.data, [{ id: 9 }]);
+});
