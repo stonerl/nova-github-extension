@@ -23,10 +23,18 @@ class GitHubIssuesProvider {
     this.itemMap = new WeakMap();
     this.initialized = false;
 
-    // re-fetch if config changes (global or workspace-scoped)
+    // Re-fetch when config changes (global or workspace-scoped).
+    // Bursts of change events (e.g. keystrokes in a settings field) are
+    // coalesced: only the last event within 500ms triggers a refresh.
+    let pendingRefresh = null;
     const refreshWhenReady = () => {
       updateContextAvailability();
-      if (isConfigReady()) this.refresh(true);
+      if (!isConfigReady()) return;
+      if (pendingRefresh) clearTimeout(pendingRefresh);
+      pendingRefresh = setTimeout(() => {
+        pendingRefresh = null;
+        this.refresh(true);
+      }, 500);
     };
     for (const key of ["github.token", "github.owner"]) {
       nova.config.observe(key, refreshWhenReady);
