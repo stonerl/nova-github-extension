@@ -1,3 +1,11 @@
+## Version 0.6.0
+
+- Per-workspace accounts: override GitHub Username and Repositories in
+  Project Settings (e.g. a work organization at work, your personal
+  account elsewhere); global settings keep working as a fallback
+- Tokens are resolved per username from the Keychain, so multi-account
+  setups work automatically
+
 ## Version 0.5.0
 
 - Browse and switch between configured GitHub repositories in the sidebar
