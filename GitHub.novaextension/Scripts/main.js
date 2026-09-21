@@ -609,19 +609,19 @@ exports.activate = function () {
   }
 
   openView.onDidChangeSelection((items) => {
-    selectedItems["issues"] = items[0] || null;
+    selectedItems["issues"] = openProvider.resolveElement(items[0]);
     clearOtherSelections("issues");
   });
   closedView.onDidChangeSelection((items) => {
-    selectedItems["closed-issues"] = items[0] || null;
+    selectedItems["closed-issues"] = closedProvider.resolveElement(items[0]);
     clearOtherSelections("closed-issues");
   });
   openPRView.onDidChangeSelection((items) => {
-    selectedItems["pulls"] = items[0] || null;
+    selectedItems["pulls"] = openPRProvider.resolveElement(items[0]);
     clearOtherSelections("pulls");
   });
   closedPRView.onDidChangeSelection((items) => {
-    selectedItems["closed-pulls"] = items[0] || null;
+    selectedItems["closed-pulls"] = closedPRProvider.resolveElement(items[0]);
     clearOtherSelections("closed-pulls");
   });
 
@@ -911,6 +911,7 @@ class GitHubIssuesProvider {
     this.type = type; // 'issue' or 'pull'
     this.rootItems = [];
     this.itemsById = new Map();
+    this.itemMap = new WeakMap();
     this.lastItemIds = new Set();
     this.initialized = false;
 
@@ -1280,11 +1281,16 @@ class GitHubIssuesProvider {
         item.contextValue = element.contextValue;
       }
     }
+    this.itemMap.set(item, element);
     return item;
   }
 
-  getItemById(id) {
-    return this.itemsById.get(String(id));
+  /**
+   * Map a TreeItem handed back by selection callbacks to its original
+   * tree element, falling back to the TreeItem itself.
+   */
+  resolveElement(treeItem) {
+    return (treeItem && this.itemMap.get(treeItem)) || treeItem || null;
   }
 }
 
