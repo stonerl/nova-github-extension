@@ -431,10 +431,10 @@ exports.activate = function () {
     doRefresh();
   }
 
-  nova.config.observe('refreshInterval', setupAutoRefresh);
+  nova.config.observe('github.refreshInterval', setupAutoRefresh);
   setupAutoRefresh(); // run once immediately
 
-  nova.config.observe('maxRecentItems', () => {
+  nova.config.observe('github.maxRecentItems', () => {
     if (!isConfigReady()) {
       console.warn('[maxRecentItems] Skipped – config incomplete');
       return;
