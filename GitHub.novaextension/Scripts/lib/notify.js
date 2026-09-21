@@ -45,6 +45,20 @@ function forbiddenError() {
   );
 }
 
+// 404 = no access (GitHub answers unauthorized private-repo access with
+// 404, not 403) or a deleted/renamed repo. Shown ONCE per session —
+// it would otherwise repeat every refresh cycle until it's fixed.
+let notFoundShown = false;
+
+function notFoundError() {
+  if (notFoundShown) return;
+  notFoundShown = true;
+  showAlert(
+    nova.workspace.showWarningMessage,
+    "Repository not found (404) — it may have been deleted or renamed, or your Personal Access Token lacks access (private repositories need the 'repo' scope).",
+  );
+}
+
 function rateLimitError() {
   showThrottled("rate-limit", () =>
     showAlert(
@@ -75,6 +89,7 @@ function configIncomplete() {
 module.exports = {
   authError,
   forbiddenError,
+  notFoundError,
   rateLimitError,
   budgetLow,
   configIncomplete,

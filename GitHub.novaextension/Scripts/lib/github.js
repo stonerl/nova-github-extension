@@ -173,6 +173,9 @@ const dataStore = {
           } else if (resp.status === 403) {
             notify.forbiddenError();
             error.handled = true;
+          } else if (resp.status === 404) {
+            notify.notFoundError();
+            error.handled = true;
           }
           throw error;
         }
@@ -262,6 +265,9 @@ async function fetchCommentsForIssue(
       } else if (resp.status === 403) {
         notify.forbiddenError();
         error.handled = true;
+      } else if (resp.status === 404) {
+        notify.notFoundError();
+        error.handled = true;
       }
       throw error;
     }
@@ -327,6 +333,9 @@ async function fetchReviewComments(
         error.handled = true;
       } else if (resp.status === 403) {
         notify.forbiddenError();
+        error.handled = true;
+      } else if (resp.status === 404) {
+        notify.notFoundError();
         error.handled = true;
       }
       throw error;
