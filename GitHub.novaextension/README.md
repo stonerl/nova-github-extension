@@ -57,8 +57,13 @@ checkout, the extension reads its `.git/config` and offers the repo:
 - If it belongs to your configured account and is in your Repositories
   list, it becomes this workspace's active repo automatically.
 - If it belongs to a different account (e.g. a work organization) or is
-  not in your list, a one-time dialog asks whether to use it in this
-  workspace.
+  not in your list, a one-time notification asks whether to use it in
+  this workspace.
+
+Detected repositories are stored by the extension itself — nothing is
+written to Nova's settings or the project's `.nova` folder. To remove
+one, right-click its row in the Repositories section and choose
+**Forget Detection**.
 
 The **GitHub Username** and **Repositories** settings can still be
 overridden per Nova workspace manually. Nova reads the workspace value

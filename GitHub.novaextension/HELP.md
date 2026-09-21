@@ -34,5 +34,12 @@ are never written there.
 
 When you open a project that is a GitHub checkout, the extension reads
 its `.git/config` and offers the repository it belongs to. If it uses a
-different account than the one configured, a dialog asks first; the
-detected account and repo are then stored for this workspace only.
+different account than the one configured, a notification asks first;
+the detected account and repo are then used for this workspace only.
+
+Detected repositories are stored by the extension itself (in
+`~/Library/Application Support/Nova/Extensions/stonerl.GitHub/
+detections.json`, keyed by workspace path) — nothing is written to
+Nova's settings or the project's `.nova` folder. To remove a detected
+repository, right-click its row in the Repositories section and choose
+**Forget Detection**.
