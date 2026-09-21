@@ -5,6 +5,7 @@ const {
   invalidateConfigCache,
   getConfiguredRepos,
   resolveActiveRepo,
+  setWorkspaceConfig,
 } = require("../config.js");
 
 class GitHubRepoProvider {
@@ -26,7 +27,7 @@ class GitHubRepoProvider {
     if (!currentRepo || !repos.includes(currentRepo)) {
       if (repos.length > 0) {
         currentRepo = repos[0];
-        nova.workspace.config.set("github.repo", currentRepo);
+        setWorkspaceConfig("github.repo", currentRepo);
         invalidateConfigCache();
         console.log(
           `[RepoSelect] No valid current repo, defaulting to "${currentRepo}"`,

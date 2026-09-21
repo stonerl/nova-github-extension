@@ -27,24 +27,30 @@ class GitHubIssuesProvider {
     // Re-fetch when config changes (global or workspace-scoped).
     // Bursts of change events (e.g. keystrokes in a settings field) are
     // coalesced: only the last event within 500ms triggers a refresh.
-    let pendingRefresh = null;
-    const refreshWhenReady = () => {
-      // No invalidation here — this fires per keystroke during settings
-      // edits; the TTL cache bounds config reads and expires naturally.
-      updateContextAvailability();
-      if (!isConfigReady()) return;
-      if (pendingRefresh) clearTimeout(pendingRefresh);
-      pendingRefresh = setTimeout(() => {
-        pendingRefresh = null;
-        this.refresh(true);
-      }, 500);
-    };
     for (const key of ["github.token", "github.owner"]) {
-      nova.config.observe(key, refreshWhenReady);
+      nova.config.observe(key, () => this.scheduleRefresh());
     }
-    for (const key of ["github.owner", "github.repo", "github.detected"]) {
-      nova.workspace.config.observe(key, refreshWhenReady);
+    for (const key of ["github.owner", "github.repo"]) {
+      nova.workspace.config.observe(key, () => this.scheduleRefresh());
     }
+  }
+
+  /**
+   * Schedule a coalesced refresh — used for config observer fires and
+   * by the detection flow (which applies its state in memory and does
+   * not produce a config change event).
+   */
+  scheduleRefresh() {
+    if (this._pendingRefresh) clearTimeout(this._pendingRefresh);
+    this._pendingRefresh = setTimeout(() => {
+      this._pendingRefresh = null;
+      updateContextAvailability();
+      if (isConfigReady()) this.refresh(true);
+    }, 500);
+  }
+
+  configChanged() {
+    this.scheduleRefresh();
   }
 
   async refresh(force = false) {

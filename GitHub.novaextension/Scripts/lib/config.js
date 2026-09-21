@@ -43,25 +43,64 @@ function readSetting(key) {
   return readScoped(nova.config, key);
 }
 
-// Repo auto-detection writes a single hidden workspace key
-// ("owner/repo") instead of three separate settings — multiple
-// workspace-config writes in quick succession can amplify into a
-// config write storm that freezes Nova. Explicit settings (manual
-// workspace overrides) still win over the detected value.
-function detectedOverride() {
-  const raw = nova.workspace.config.get("github.detected");
+// Repo auto-detection never writes workspace config: single config
+// writes have been observed to amplify into thousands of writes inside
+// Nova (write storm → freeze). Instead, detections are kept in memory
+// and persisted in the extension's own global storage file. Explicit
+// settings (manual workspace overrides) still win over detection.
+const detectionsPath = `${nova.extension.globalStoragePath}/detections.json`;
+let detectedWorkspace = null; // { owner, repo } for this workspace path
+
+function parseDetectedEntry(raw) {
   if (!raw || typeof raw !== "string") return null;
   const slash = raw.indexOf("/");
   if (slash < 1 || slash === raw.length - 1) return null;
-  const owner = raw.slice(0, slash);
-  const repo = raw.slice(slash + 1);
-  return { owner, repo, repos: [repo] };
+  return { owner: raw.slice(0, slash), repo: raw.slice(slash + 1) };
+}
+
+function loadDetections() {
+  try {
+    const file = nova.fs.open(detectionsPath, "r");
+    const text = file.read();
+    file.close();
+    const map = JSON.parse(text);
+    detectedWorkspace = parseDetectedEntry(map[nova.workspace.path]);
+  } catch {
+    detectedWorkspace = null; // no file yet, or unreadable
+  }
+}
+
+function saveDetectionForWorkspace(owner, repo) {
+  let map = {};
+  try {
+    const file = nova.fs.open(detectionsPath, "r");
+    const text = file.read();
+    file.close();
+    map = JSON.parse(text);
+  } catch {
+    // no file yet
+  }
+  const path = nova.workspace.path;
+  if (!path) return;
+  map[path] = `${owner}/${repo}`;
+  try {
+    const file = nova.fs.open(detectionsPath, "w+t");
+    file.write(JSON.stringify(map, null, 2));
+    file.close();
+  } catch (e) {
+    console.warn("[Detect] Failed to persist detection:", e);
+  }
+  detectedWorkspace = { owner, repo };
+}
+
+function detectedOverride() {
+  return detectedWorkspace;
 }
 
 function resolveOwner() {
   const ws = nova.workspace.config.get("github.owner");
   if (ws !== null && ws !== undefined) return ws;
-  const detected = detectedOverride();
+  const detected = detectedWorkspace;
   if (detected) return detected.owner;
   return nova.config.get("github.owner");
 }
@@ -69,17 +108,35 @@ function resolveOwner() {
 function getConfiguredRepos() {
   const ws = nova.workspace.config.get("github.repos");
   if (ws !== null && ws !== undefined) return ws;
-  const detected = detectedOverride();
-  if (detected) return detected.repos;
+  if (detectedWorkspace) return [detectedWorkspace.repo];
   return nova.config.get("github.repos");
 }
 
 function resolveActiveRepo() {
   const ws = nova.workspace.config.get("github.repo");
   if (ws !== null && ws !== undefined) return ws;
-  const detected = detectedOverride();
-  if (detected) return detected.repo;
+  if (detectedWorkspace) return detectedWorkspace.repo;
   return null;
+}
+
+// Audit every config write the extension performs. If Nova ever
+// amplifies a write into a storm, the Extension Console names the
+// call site and the count immediately.
+let configSetCount = 0;
+function setGlobalConfig(key, value) {
+  configSetCount++;
+  console.log(
+    `[SetAudit] #${configSetCount} ${key} = ${JSON.stringify(value)}`,
+  );
+  nova.config.set(key, value);
+}
+
+function setWorkspaceConfig(key, value) {
+  configSetCount++;
+  console.log(
+    `[SetAudit] #${configSetCount} workspace ${key} = ${JSON.stringify(value)}`,
+  );
+  nova.workspace.config.set(key, value);
 }
 
 // Enum settings come back as strings ("50"); numeric coercion keeps
@@ -169,7 +226,7 @@ function getLastRefresh() {
 
 function setLastRefresh(ts) {
   try {
-    nova.config.set("github.lastRefresh", ts);
+    setGlobalConfig("github.lastRefresh", ts);
   } catch (e) {
     console.warn("[Config] Failed to record last refresh:", e);
   }
@@ -187,5 +244,8 @@ module.exports = {
   resolveOwner,
   getConfiguredRepos,
   resolveActiveRepo,
-  detectedOverride,
+  loadDetections,
+  saveDetectionForWorkspace,
+  setGlobalConfig,
+  setWorkspaceConfig,
 };
