@@ -11,7 +11,7 @@
   "categories": ["sidebars", "commands"],
 
   "main": "main.js",
-  "activationEvents": ["onView:github-issues"],
+  "activationEvents": ["onView:github-issues", "onView:github-pull"],
 
   "config": [
     {
