@@ -8,8 +8,8 @@ class GitHubRepoProvider {
   }
 
   updateRepoList() {
-    // 1) load all repos from config
-    const repos = nova.config.get("github.repos") || [];
+    // 1) load all repos from config (workspace override wins)
+    const repos = nova.workspace.config.get("github.repos") || [];
 
     // 2) figure out the “current” repo
     let currentRepo = nova.workspace.config.get("github.repo");

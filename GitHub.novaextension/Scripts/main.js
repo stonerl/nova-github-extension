@@ -150,7 +150,7 @@ exports.activate = function () {
       return;
     }
 
-    const repos = nova.config.get("github.repos") || [];
+    const repos = nova.workspace.config.get("github.repos") || [];
     let newRepo = items[0]?.identifier;
 
     // if they didn’t actually pick one (or it’s no longer in the list),
@@ -234,7 +234,7 @@ exports.activate = function () {
 
   // Move the token from the settings field into the Keychain
   nova.config.observe("github.token", (newValue) => {
-    const owner = nova.config.get("github.owner") || "default";
+    const owner = nova.workspace.config.get("github.owner") || "default";
     if (newValue === "") {
       nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
       console.log("[Config] GitHub token removed from Keychain");

@@ -4,8 +4,10 @@
 const CREDENTIALS_SERVICE = "github-for-nova";
 
 function loadConfig() {
-  // 1) Owner is now mandatory
-  const owner = nova.config.get("github.owner");
+  // 1) Owner is now mandatory. Read from the workspace scope first so
+  //    each project can use its own account (e.g. a work organization),
+  //    falling back to the global setting otherwise.
+  const owner = nova.workspace.config.get("github.owner");
   if (!owner) {
     console.error("[Config] github.owner must be set");
     return { token: null, owner: null, repo: null /*…*/ };
