@@ -1,7 +1,7 @@
 {
   "identifier": "stonerl.GitHub",
   "organization": "Toni Förster",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "name": "GitHub",
   "description": "Browse, manage, and triage GitHub issues and pull requests directly from Nova’s sidebar.",
   "license": "MIT License",
@@ -68,6 +68,23 @@
       "description": "Number of issues or pull requests to fetch per API call. Higher values reduce request frequency and improve ETag efficiency. The GitHub API allows up to 100 items per request.",
       "default": "100",
       "values": ["25", "50", "75", "100"]
+    }
+  ],
+
+  "configWorkspace": [
+    {
+      "key": "github.owner",
+      "type": "string",
+      "title": "GitHub Username",
+      "description": "Optional workspace override. When set, this workspace uses this account (e.g. a work organization) instead of the global GitHub Username.",
+      "placeholder": "stonerl"
+    },
+    {
+      "key": "github.repos",
+      "type": "stringArray",
+      "title": "Repositories",
+      "description": "Optional workspace override. When set, this workspace shows these repositories instead of the global list. Repository names only, without the URL.",
+      "placeholder": "nova-github-extension"
     }
   ],
 

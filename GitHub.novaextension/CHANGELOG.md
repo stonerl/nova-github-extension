@@ -1,3 +1,14 @@
+## Version 0.6.1
+
+- Workspace settings UI: GitHub Username and Repositories can now be
+  set per project under Project Settings → Extensions → GitHub
+  (the runtime already supported overrides — the settings UI was
+  previously missing)
+- Fixed: config values now resolve correctly when only the global
+  setting is set (workspace values no longer shadow the global ones)
+- Performance: config reads are cached and debounced, fixing a freeze
+  when entering the Personal Access Token
+
 ## Version 0.6.0
 
 - Per-workspace accounts: override GitHub Username and Repositories in

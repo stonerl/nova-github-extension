@@ -26,4 +26,6 @@ open the project and go to _Project Settings → Extensions → GitHub_.
 The workspace value wins over the global one, so you can use a work
 organization in one project and your personal account in another.
 Tokens are stored per username in the Keychain — paste the matching
-Personal Access Token once per account.
+Personal Access Token once per account. The Token field is global-only:
+workspace settings are saved to the project's `.nova` folder and tokens
+are never written there.

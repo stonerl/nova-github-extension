@@ -62,7 +62,9 @@ global setting:
 
 Tokens are stored in the macOS Keychain per username, so each account uses
 its own Personal Access Token automatically — paste the matching token once
-per account.
+per account. The token setting itself is deliberately global-only:
+workspace configuration lives in the project's `.nova` folder, which is
+often checked into source control, and tokens are never written there.
 
 ## 🔒 Privacy
 
