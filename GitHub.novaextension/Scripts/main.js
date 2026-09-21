@@ -1163,12 +1163,6 @@ class GitHubIssuesProvider {
             : [];
         const allComments = [...comments, ...reviewComments];
 
-        /*console.log(
-          `[Comments] Issue #${i.number}: issueComments=`,
-          comments.length,
-          'reviewComments=',
-          reviewComments.length,
-        );*/
         if (allComments.length > 0) {
           const group = new IssueItem({
             title: "Comments",
@@ -1292,41 +1286,6 @@ class GitHubIssuesProvider {
   resolveElement(treeItem) {
     return (treeItem && this.itemMap.get(treeItem)) || treeItem || null;
   }
-}
-
-async function waitForIssueState(issueNumber, desiredState, maxRetries = 10) {
-  const { token, owner, repo } = loadConfig();
-  const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
-  for (let i = 0; i < maxRetries; i++) {
-    console.log(
-      `[Wait] Checking state for issue #${issueNumber} (try ${i + 1}/${maxRetries})...`,
-    );
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: `token ${token}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    });
-    if (!resp.ok) {
-      console.warn(`[Wait] GitHub API returned ${resp.status}; stopping early`);
-      break;
-    }
-
-    const issue = await resp.json();
-    if (issue.state === desiredState) {
-      console.log(
-        `[Wait] Issue #${issueNumber} is now in state "${desiredState}"`,
-      );
-      return true;
-    }
-
-    await new Promise((r) => setTimeout(r, 1000)); // wait 1s
-  }
-
-  console.warn(
-    `[Wait] Gave up waiting for issue #${issueNumber} to reach state "${desiredState}"`,
-  );
-  return false;
 }
 
 async function updateIssueState(newState, reason) {
