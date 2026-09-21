@@ -75,6 +75,7 @@ function loadCache(type, state) {
 const dataStore = {
   cache: {},
   etags: {},
+  pullDetails: {},
 
   async fetchState(type, state, token, owner, repo) {
     const key = `${type}-${state}`;
@@ -544,6 +545,7 @@ exports.activate = function () {
     // Clear cache
     dataStore.cache = {};
     dataStore.etags = {};
+    dataStore.pullDetails = {};
 
     // Delay to let workspace config observers update
     setTimeout(() => {
@@ -989,18 +991,33 @@ class GitHubIssuesProvider {
         // 6a) Hydrate PR fields *before* creating the node
         if (this.type === "pull") {
           const originalComments = i.comments;
-          const pullResp = await fetch(
-            `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
-            { headers },
-          );
-          if (pullResp.ok) {
-            const pullData = await pullResp.json();
-            // merge only the fields you need
-            i.draft = pullData.draft;
-            i.merged_at = pullData.merged_at;
-            i.head = pullData.head;
-            i.base = pullData.base;
-            i.review_comments = pullData.review_comments;
+          const detailKey = `${owner}/${repo}#${i.number}`;
+          const cachedDetail = dataStore.pullDetails[detailKey];
+
+          if (cachedDetail && cachedDetail.updated_at === i.updated_at) {
+            // PR unchanged since last hydration — reuse memoized details
+            Object.assign(i, cachedDetail.data);
+          } else {
+            const pullResp = await fetch(
+              `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
+              { headers },
+            );
+            if (pullResp.ok) {
+              const pullData = await pullResp.json();
+              // merge only the fields you need
+              const detail = {
+                draft: pullData.draft,
+                merged_at: pullData.merged_at,
+                head: pullData.head,
+                base: pullData.base,
+                review_comments: pullData.review_comments,
+              };
+              dataStore.pullDetails[detailKey] = {
+                updated_at: i.updated_at,
+                data: detail,
+              };
+              Object.assign(i, detail);
+            }
           }
           i.comments = originalComments;
         }
