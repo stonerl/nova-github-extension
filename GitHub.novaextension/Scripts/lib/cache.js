@@ -6,13 +6,19 @@
 
 const cacheDir = `${nova.extension.globalStoragePath}/cache`;
 
+// Directories already ensured this session — mkdir on every cache
+// access would throw/catch across the fs bridge per call.
+const ensuredDirs = new Set();
+
 function ensureDirExists(dir) {
+  if (ensuredDirs.has(dir)) return;
   try {
     nova.fs.mkdir(dir);
   } catch (err) {
     // if it already exists, mkdir will throw; ignore that
     // any other error you’d probably want to know about
   }
+  ensuredDirs.add(dir);
 }
 
 function repoDirFor(owner, repo) {

@@ -113,198 +113,198 @@ class GitHubIssuesProvider {
     this.initialized = true;
     this.itemsById.clear();
 
-    // 6) Build tree
-    this.rootItems = await Promise.all(
-      issues.map(async (i) => {
-        // 6a) Hydrate PR fields *before* creating the node
-        if (this.type === "pull") {
-          const originalComments = i.comments;
-          const detailKey = `${owner}/${repo}#${i.number}`;
-          const cachedDetail = dataStore.pullDetails[detailKey];
+    // 6) Build tree. Items are processed with bounded concurrency —
+    // PR hydration fetches a detail endpoint per item, and a few
+    // hundred simultaneous requests can trigger rate limits and
+    // flood Nova's process bridges.
+    this.rootItems = await mapPool(issues, 6, async (i) => {
+      // 6a) Hydrate PR fields *before* creating the node
+      if (this.type === "pull") {
+        const originalComments = i.comments;
+        const detailKey = `${owner}/${repo}#${i.number}`;
+        const cachedDetail = dataStore.pullDetails[detailKey];
 
-          if (cachedDetail && cachedDetail.updated_at === i.updated_at) {
-            // PR unchanged since last hydration — reuse memoized details
-            Object.assign(i, cachedDetail.data);
-          } else {
-            const pullResp = await fetch(
-              `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
-              { headers },
-            );
-            if (pullResp.ok) {
-              const pullData = await pullResp.json();
-              // merge only the fields you need
-              const detail = {
-                draft: pullData.draft,
-                merged_at: pullData.merged_at,
-                head: pullData.head,
-                base: pullData.base,
-                review_comments: pullData.review_comments,
-              };
-              dataStore.pullDetails[detailKey] = {
-                updated_at: i.updated_at,
-                data: detail,
-              };
-              Object.assign(i, detail);
-            }
+        if (cachedDetail && cachedDetail.updated_at === i.updated_at) {
+          // PR unchanged since last hydration — reuse memoized details
+          Object.assign(i, cachedDetail.data);
+        } else {
+          const pullResp = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
+            { headers },
+          );
+          if (pullResp.ok) {
+            const pullData = await pullResp.json();
+            // merge only the fields you need
+            const detail = {
+              draft: pullData.draft,
+              merged_at: pullData.merged_at,
+              head: pullData.head,
+              base: pullData.base,
+              review_comments: pullData.review_comments,
+            };
+            dataStore.pullDetails[detailKey] = {
+              updated_at: i.updated_at,
+              data: detail,
+            };
+            Object.assign(i, detail);
           }
-          i.comments = originalComments;
         }
+        i.comments = originalComments;
+      }
 
-        // 6b) Create the node
-        const parent = new IssueItem(i);
-        this.itemsById.set(String(i.id), parent);
+      // 6b) Create the node
+      const parent = new IssueItem(i);
+      this.itemsById.set(String(i.id), parent);
 
-        // 6c) Standard children (state, dates, author, assignees, milestone, labels)
-        // – show reopen/close reason
-        if (i.state_reason === "reopened") {
-          const reasonItem = new IssueItem({
-            title: "Reopened",
-            image: "issue_reopened",
+      // 6c) Standard children (state, dates, author, assignees, milestone, labels)
+      // – show reopen/close reason
+      if (i.state_reason === "reopened") {
+        const reasonItem = new IssueItem({
+          title: "Reopened",
+          image: "issue_reopened",
+        });
+        reasonItem.parent = parent;
+        parent.children.push(reasonItem);
+      } else if (i.state === "closed" && i.state_reason) {
+        const map = {
+          completed: { text: "Completed", image: "issue_completed" },
+          not_planned: { text: "Not Planned", image: "issue_not_planned" },
+          duplicate: { text: "Duplicate", image: "issue_not_planned" },
+        };
+        const r = map[i.state_reason] || { text: i.state_reason };
+        const reasonItem = new IssueItem({ title: r.text, image: r.image });
+        reasonItem.parent = parent;
+        parent.children.push(reasonItem);
+      }
+
+      // – creation & update timestamps
+      const isClosed = i.state === "closed";
+
+      if (isClosed && i.closed_at) {
+        const closedAt = new IssueItem({
+          title: "Closed",
+          body: new Date(i.closed_at).toLocaleString(),
+          image: ["not_planned", "duplicate"].includes(i.state_reason)
+            ? "pr_closed"
+            : "issue_closed",
+        });
+        closedAt.parent = parent;
+        parent.children.push(closedAt);
+      } else {
+        const createdAt = new IssueItem({
+          title: "Created",
+          body: new Date(i.created_at).toLocaleString(),
+          image: "issue_created",
+        });
+        createdAt.parent = parent;
+        parent.children.push(createdAt);
+
+        if (i.updated_at !== i.created_at) {
+          const updatedAt = new IssueItem({
+            title: "Updated",
+            body: new Date(i.updated_at).toLocaleString(),
+            image: "issue_updated",
           });
-          reasonItem.parent = parent;
-          parent.children.push(reasonItem);
-        } else if (i.state === "closed" && i.state_reason) {
-          const map = {
-            completed: { text: "Completed", image: "issue_completed" },
-            not_planned: { text: "Not Planned", image: "issue_not_planned" },
-            duplicate: { text: "Duplicate", image: "issue_not_planned" },
-          };
-          const r = map[i.state_reason] || { text: i.state_reason };
-          const reasonItem = new IssueItem({ title: r.text, image: r.image });
-          reasonItem.parent = parent;
-          parent.children.push(reasonItem);
+          updatedAt.parent = parent;
+          parent.children.push(updatedAt);
         }
+      }
 
-        // – creation & update timestamps
-        const isClosed = i.state === "closed";
-
-        if (isClosed && i.closed_at) {
-          const closedAt = new IssueItem({
+      if (this.type === "pull") {
+        if (i.merged_at) {
+          const merged = new IssueItem({
+            title: "Merged",
+            body: new Date(i.merged_at).toLocaleString(),
+            image: "issue_closed",
+          });
+          merged.parent = parent;
+          parent.children.push(merged);
+        } else if (isClosed) {
+          const prClosed = new IssueItem({
             title: "Closed",
             body: new Date(i.closed_at).toLocaleString(),
-            image: ["not_planned", "duplicate"].includes(i.state_reason)
-              ? "pr_closed"
-              : "issue_closed",
+            image: "pr_closed",
           });
-          closedAt.parent = parent;
-          parent.children.push(closedAt);
-        } else {
-          const createdAt = new IssueItem({
-            title: "Created",
-            body: new Date(i.created_at).toLocaleString(),
-            image: "issue_created",
-          });
-          createdAt.parent = parent;
-          parent.children.push(createdAt);
-
-          if (i.updated_at !== i.created_at) {
-            const updatedAt = new IssueItem({
-              title: "Updated",
-              body: new Date(i.updated_at).toLocaleString(),
-              image: "issue_updated",
-            });
-            updatedAt.parent = parent;
-            parent.children.push(updatedAt);
-          }
+          prClosed.parent = parent;
+          parent.children.push(prClosed);
         }
+      }
 
-        if (this.type === "pull") {
-          if (i.merged_at) {
-            const merged = new IssueItem({
-              title: "Merged",
-              body: new Date(i.merged_at).toLocaleString(),
-              image: "issue_closed",
-            });
-            merged.parent = parent;
-            parent.children.push(merged);
-          } else if (isClosed) {
-            const prClosed = new IssueItem({
-              title: "Closed",
-              body: new Date(i.closed_at).toLocaleString(),
-              image: "pr_closed",
-            });
-            prClosed.parent = parent;
-            parent.children.push(prClosed);
-          }
-        }
+      // – author
+      if (i.user?.login) {
+        const author = new IssueItem({
+          title: "Author",
+          body: i.user.login,
+          image: "author",
+        });
+        author.parent = parent;
+        parent.children.push(author);
+      }
 
-        // – author
-        if (i.user?.login) {
-          const author = new IssueItem({
-            title: "Author",
-            body: i.user.login,
-            image: "author",
-          });
-          author.parent = parent;
-          parent.children.push(author);
-        }
+      // – assignees
+      const assignees = i.assignees?.length
+        ? i.assignees
+        : i.assignee
+          ? [i.assignee]
+          : [];
+      for (const a of assignees) {
+        const asn = new IssueItem({
+          title: "Assignee",
+          body: a.login,
+          image: "assignee",
+        });
+        asn.parent = parent;
+        parent.children.push(asn);
+      }
 
-        // – assignees
-        const assignees = i.assignees?.length
-          ? i.assignees
-          : i.assignee
-            ? [i.assignee]
-            : [];
-        for (const a of assignees) {
-          const asn = new IssueItem({
-            title: "Assignee",
-            body: a.login,
-            image: "assignee",
-          });
-          asn.parent = parent;
-          parent.children.push(asn);
-        }
+      // – milestone
+      if (i.milestone?.title) {
+        const ms = new IssueItem({
+          title: "Milestone",
+          body: i.milestone.title,
+        });
+        ms.parent = parent;
+        parent.children.push(ms);
+      }
 
-        // – milestone
-        if (i.milestone?.title) {
-          const ms = new IssueItem({
-            title: "Milestone",
-            body: i.milestone.title,
-          });
-          ms.parent = parent;
-          parent.children.push(ms);
-        }
+      // – labels
+      for (const lbl of i.labels || []) {
+        const rgb = hexToRgb(lbl.color);
+        const li = new IssueItem({
+          title: lbl.name,
+          color: rgb && Color.rgb(rgb.r, rgb.g, rgb.b),
+        });
+        li.parent = parent;
+        parent.children.push(li);
+      }
 
-        // – labels
-        for (const lbl of i.labels || []) {
-          const rgb = hexToRgb(lbl.color);
-          const li = new IssueItem({
-            title: lbl.name,
-            color: rgb && Color.rgb(rgb.r, rgb.g, rgb.b),
-          });
-          li.parent = parent;
-          parent.children.push(li);
-        }
+      // 6d) Comments & review‐comments
+      // 6d) Comments are loaded lazily: the group node carries the
+      // request info, actual fetching happens in getChildren() when
+      // the user expands the group. This keeps enabling the extension
+      // at a handful of requests instead of one per issue.
+      const commentCount =
+        (i.comments || 0) + (this.type === "pull" ? i.review_comments || 0 : 0);
+      if (commentCount > 0) {
+        const group = new IssueItem({
+          title: "Comments",
+          body: `(${commentCount})`,
+          image: "comments",
+        });
+        group.parent = parent;
+        group.commentSource = {
+          kind: this.type, // 'issue' | 'pull'
+          number: i.number,
+          issueComments: i.comments || 0,
+          reviewComments: this.type === "pull" ? i.review_comments || 0 : 0,
+          cfg: { token, owner, repo },
+        };
 
-        // 6d) Comments & review‐comments
-        // 6d) Comments are loaded lazily: the group node carries the
-        // request info, actual fetching happens in getChildren() when
-        // the user expands the group. This keeps enabling the extension
-        // at a handful of requests instead of one per issue.
-        const commentCount =
-          (i.comments || 0) +
-          (this.type === "pull" ? i.review_comments || 0 : 0);
-        if (commentCount > 0) {
-          const group = new IssueItem({
-            title: "Comments",
-            body: `(${commentCount})`,
-            image: "comments",
-          });
-          group.parent = parent;
-          group.commentSource = {
-            kind: this.type, // 'issue' | 'pull'
-            number: i.number,
-            issueComments: i.comments || 0,
-            reviewComments: this.type === "pull" ? i.review_comments || 0 : 0,
-            cfg: { token, owner, repo },
-          };
+        parent.children.push(group);
+      }
 
-          parent.children.push(group);
-        }
-
-        return parent;
-      }),
-    );
+      return parent;
+    });
 
     return true;
   }
@@ -416,6 +416,25 @@ class GitHubIssuesProvider {
   resolveElement(treeItem) {
     return (treeItem && this.itemMap.get(treeItem)) || treeItem || null;
   }
+}
+
+/**
+ * Map items over an async worker with at most `limit` operations in
+ * flight. Results keep input order.
+ */
+async function mapPool(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
 }
 
 /**
