@@ -27,12 +27,12 @@ function repoDirFor(owner, repo) {
   return repoDir;
 }
 
-function cachePath(type, state, owner, repo) {
-  return `${repoDirFor(owner, repo)}/${type}-${state}.json`; // e.g. pull-open.json
+function cachePath(state, owner, repo) {
+  return `${repoDirFor(owner, repo)}/${state}.json`; // e.g. open.json
 }
 
-function saveCache(type, state, data, owner, repo) {
-  const path = cachePath(type, state, owner, repo);
+function saveCache(state, data, owner, repo) {
+  const path = cachePath(state, owner, repo);
   try {
     const file = nova.fs.open(path, "w+t");
     file.write(JSON.stringify(data));
@@ -42,8 +42,8 @@ function saveCache(type, state, data, owner, repo) {
   }
 }
 
-function loadCache(type, state, owner, repo) {
-  const path = cachePath(type, state, owner, repo);
+function loadCache(state, owner, repo) {
+  const path = cachePath(state, owner, repo);
   try {
     const file = nova.fs.open(path, "r");
     const text = file.read();

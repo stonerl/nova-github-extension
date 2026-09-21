@@ -126,18 +126,15 @@ exports.activate = function () {
       }
 
       const { token, owner, repo } = loadConfig();
-      const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
-        dataStore.fetchState("issue", "open", token, owner, repo),
-        dataStore.fetchState("issue", "closed", token, owner, repo),
-        dataStore.fetchState("pull", "open", token, owner, repo),
-        dataStore.fetchState("pull", "closed", token, owner, repo),
+      const [openData, closedData] = await Promise.all([
+        dataStore.fetchState("open", token, owner, repo),
+        dataStore.fetchState("closed", token, owner, repo),
       ]);
 
-      if (await openProvider.refreshWithData(openIssues)) openView.reload();
-      if (await closedProvider.refreshWithData(closedIssues))
-        closedView.reload();
-      if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
-      if (await closedPRProvider.refreshWithData(closedPRs))
+      if (await openProvider.refreshWithData(openData)) openView.reload();
+      if (await openPRProvider.refreshWithData(openData)) openPRView.reload();
+      if (await closedProvider.refreshWithData(closedData)) closedView.reload();
+      if (await closedPRProvider.refreshWithData(closedData))
         closedPRView.reload();
 
       setLastRefresh(now);
@@ -172,22 +169,20 @@ exports.activate = function () {
 
         const { token, owner, repo } = loadConfig();
         Promise.all([
-          dataStore.fetchState("issue", "open", token, owner, repo),
-          dataStore.fetchState("issue", "closed", token, owner, repo),
-          dataStore.fetchState("pull", "open", token, owner, repo),
-          dataStore.fetchState("pull", "closed", token, owner, repo),
-        ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
+          dataStore.fetchState("open", token, owner, repo),
+          dataStore.fetchState("closed", token, owner, repo),
+        ]).then(([openData, closedData]) => {
           openProvider
-            .refreshWithData(openIssues)
+            .refreshWithData(openData)
             .then((c) => c && openView.reload());
-          closedProvider
-            .refreshWithData(closedIssues)
-            .then((c) => c && closedView.reload());
           openPRProvider
-            .refreshWithData(openPRs)
+            .refreshWithData(openData)
             .then((c) => c && openPRView.reload());
+          closedProvider
+            .refreshWithData(closedData)
+            .then((c) => c && closedView.reload());
           closedPRProvider
-            .refreshWithData(closedPRs)
+            .refreshWithData(closedData)
             .then((c) => c && closedPRView.reload());
         });
       }),
@@ -432,18 +427,15 @@ exports.activate = function () {
           (now - getLastRefresh()) / 1000,
         )}s since last — loading from cache instead`,
       );
-      // load whatever’s on disk and populate the views
+      // load whatever's on disk and populate the views
       const { owner, repo } = loadConfig();
-      const cachedOpenIssues = loadCache("issue", "open", owner, repo) || [];
-      const cachedClosedIssues =
-        loadCache("issue", "closed", owner, repo) || [];
-      const cachedOpenPRs = loadCache("pull", "open", owner, repo) || [];
-      const cachedClosedPRs = loadCache("pull", "closed", owner, repo) || [];
+      const cachedOpen = loadCache("open", owner, repo) || [];
+      const cachedClosed = loadCache("closed", owner, repo) || [];
 
-      await openProvider.refreshWithData(cachedOpenIssues);
-      await closedProvider.refreshWithData(cachedClosedIssues);
-      await openPRProvider.refreshWithData(cachedOpenPRs);
-      await closedPRProvider.refreshWithData(cachedClosedPRs);
+      await openProvider.refreshWithData(cachedOpen);
+      await openPRProvider.refreshWithData(cachedOpen);
+      await closedProvider.refreshWithData(cachedClosed);
+      await closedPRProvider.refreshWithData(cachedClosed);
 
       openView.reload();
       closedView.reload();
@@ -458,20 +450,18 @@ exports.activate = function () {
     }
 
     const { token, owner, repo } = loadConfig();
-    const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
-      dataStore.fetchState("issue", "open", token, owner, repo),
-      dataStore.fetchState("issue", "closed", token, owner, repo),
-      dataStore.fetchState("pull", "open", token, owner, repo),
-      dataStore.fetchState("pull", "closed", token, owner, repo),
+    const [openData, closedData] = await Promise.all([
+      dataStore.fetchState("open", token, owner, repo),
+      dataStore.fetchState("closed", token, owner, repo),
     ]);
 
-    if (await openProvider.refreshWithData(openIssues)) openView.reload();
-    if (await closedProvider.refreshWithData(closedIssues)) closedView.reload();
-    if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
-    if (await closedPRProvider.refreshWithData(closedPRs))
+    if (await openProvider.refreshWithData(openData)) openView.reload();
+    if (await openPRProvider.refreshWithData(openData)) openPRView.reload();
+    if (await closedProvider.refreshWithData(closedData)) closedView.reload();
+    if (await closedPRProvider.refreshWithData(closedData))
       closedPRView.reload();
 
-    // record that we just did our “initial” fetch
+    // record that we just did our "initial" fetch
     setLastRefresh(now);
   }
 
@@ -483,17 +473,19 @@ exports.activate = function () {
       return;
     }
     const { token, owner, repo } = loadConfig();
-    const [openIssues, closedIssues, openPRs, closedPRs] = await Promise.all([
-      dataStore.fetchState("issue", "open", token, owner, repo),
-      dataStore.fetchState("issue", "closed", token, owner, repo),
-      dataStore.fetchState("pull", "open", token, owner, repo),
-      dataStore.fetchState("pull", "closed", token, owner, repo),
+    const [openData, closedData] = await Promise.all([
+      dataStore.fetchState("open", token, owner, repo, {
+        allowBudgetSkip: false,
+      }),
+      dataStore.fetchState("closed", token, owner, repo, {
+        allowBudgetSkip: false,
+      }),
     ]);
 
-    if (await openProvider.refreshWithData(openIssues)) openView.reload();
-    if (await closedProvider.refreshWithData(closedIssues)) closedView.reload();
-    if (await openPRProvider.refreshWithData(openPRs)) openPRView.reload();
-    if (await closedPRProvider.refreshWithData(closedPRs))
+    if (await openProvider.refreshWithData(openData)) openView.reload();
+    if (await openPRProvider.refreshWithData(openData)) openPRView.reload();
+    if (await closedProvider.refreshWithData(closedData)) closedView.reload();
+    if (await closedPRProvider.refreshWithData(closedData))
       closedPRView.reload();
   });
 

@@ -63,6 +63,15 @@ function rateLimitError() {
   );
 }
 
+function budgetLow(remaining) {
+  showThrottled("budget", () =>
+    showAlert(
+      nova.workspace.showWarningMessage,
+      `GitHub API budget low (${remaining} requests left) — auto-refresh paused until the limit resets. Manual refresh still works.`,
+    ),
+  );
+}
+
 function configIncomplete() {
   showThrottled("config", () =>
     showAlert(
@@ -77,5 +86,6 @@ module.exports = {
   authError,
   forbiddenError,
   rateLimitError,
+  budgetLow,
   configIncomplete,
 };

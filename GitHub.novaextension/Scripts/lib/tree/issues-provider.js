@@ -71,13 +71,9 @@ class GitHubIssuesProvider {
 
     let data;
     try {
-      data = await dataStore.fetchState(
-        this.type,
-        this.state,
-        token,
-        owner,
-        repo,
-      );
+      // One request per state — the issue and pull providers of the
+      // same state share it via the in-flight map in dataStore.
+      data = await dataStore.fetchState(this.state, token, owner, repo);
     } catch (err) {
       console.error(`[${this.type}-${this.state}] cannot load data:`, err);
       return false;

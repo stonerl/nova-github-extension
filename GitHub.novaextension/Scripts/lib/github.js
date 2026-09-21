@@ -14,6 +14,13 @@ const notify = require("./notify.js");
 let isRateLimited = false;
 const rateLimitLogged = new Set();
 
+// Budget tracking from x-ratelimit headers: when the shared budget is
+// nearly exhausted, auto-refresh steps aside until the reset so other
+// tools using the same token keep theirs.
+const BUDGET_SKIP_THRESHOLD = 100;
+let budgetRemaining = null;
+let budgetResetAt = 0;
+
 function resetRateLimitFlag() {
   isRateLimited = false;
 }
@@ -58,25 +65,41 @@ const dataStore = {
   pullDetails: {},
   _inFlight: {},
 
-  // Deduplicates concurrent identical fetches: activation triggers two
-  // loads of the same four lists; they share one request each.
-  fetchState(type, state, token, owner, repo) {
-    const key = `${type}-${state}`;
-    if (this._inFlight[key]) return this._inFlight[key];
-    const pending = this._fetchState(type, state, token, owner, repo).finally(
-      () => {
-        delete this._inFlight[key];
-      },
-    );
-    this._inFlight[key] = pending;
+  // One fetch per STATE: the /issues endpoint returns issues AND pull
+  // requests, and filtering happens in the providers — the issue and
+  // pull providers share one request per state via the in-flight map.
+  fetchState(state, token, owner, repo, options = {}) {
+    const allowBudgetSkip = options.allowBudgetSkip !== false;
+    if (
+      allowBudgetSkip &&
+      budgetRemaining !== null &&
+      budgetRemaining < BUDGET_SKIP_THRESHOLD &&
+      budgetResetAt > Date.now()
+    ) {
+      console.warn(
+        `[GitHub] Budget low (${budgetRemaining} left) — skipping auto-fetch of ${state}`,
+      );
+      notify.budgetLow(budgetRemaining);
+      const disk = loadCache(state, owner, repo);
+      if (disk) {
+        this.cache[state] = disk;
+        return disk;
+      }
+      return [];
+    }
+    if (this._inFlight[state]) return this._inFlight[state];
+    const pending = this._fetchState(state, token, owner, repo).finally(() => {
+      delete this._inFlight[state];
+    });
+    this._inFlight[state] = pending;
     return pending;
   },
 
-  async _fetchState(type, state, token, owner, repo) {
-    const key = `${type}-${state}`;
+  async _fetchState(state, token, owner, repo) {
+    const key = state;
     if (isRateLimited) {
       console.warn(`[GitHub] Skipping fetchState(${state}) due to rate-limit`);
-      const disk = loadCache(type, state, owner, repo);
+      const disk = loadCache(state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
         return disk;
@@ -109,6 +132,14 @@ const dataStore = {
 
         resp = await fetch(url, { headers });
 
+        // track the shared budget for budget-aware auto-refresh
+        const remRaw = resp.headers.get("x-ratelimit-remaining");
+        if (remRaw !== null && remRaw !== undefined) {
+          budgetRemaining = +remRaw;
+          const resetRaw = resp.headers.get("x-ratelimit-reset");
+          budgetResetAt = resetRaw ? +resetRaw * 1000 : 0;
+        }
+
         const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
         const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
         if (remaining === 0) {
@@ -117,7 +148,7 @@ const dataStore = {
             +resp.headers.get("retry-after") || 0,
             "issues",
           );
-          const disk = loadCache(type, state, owner, repo);
+          const disk = loadCache(state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
             return disk;
@@ -126,7 +157,7 @@ const dataStore = {
         }
 
         if (resp.status === 304) {
-          const disk = loadCache(type, state, owner, repo);
+          const disk = loadCache(state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
             return disk;
@@ -170,12 +201,12 @@ const dataStore = {
       }
 
       this.cache[key] = allItems;
-      saveCache(type, state, allItems, owner, repo);
+      saveCache(state, allItems, owner, repo);
       return allItems;
     } catch (err) {
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
       if (!err || !err.handled) notify.networkError();
-      const disk = loadCache(type, state, owner, repo);
+      const disk = loadCache(state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
         return disk;
