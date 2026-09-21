@@ -16,6 +16,7 @@ const {
   saveDetectionForWorkspace,
   setGlobalConfig,
   setWorkspaceConfig,
+  skipInitialCall,
   CREDENTIALS_SERVICE,
 } = require("./lib/config.js");
 const { cacheDir, ensureDirExists, loadCache } = require("./lib/cache.js");
@@ -25,6 +26,7 @@ const { GitHubRepoProvider } = require("./lib/tree/repo-provider.js");
 const { parseGitConfig, decideDetection } = require("./lib/detect.js");
 
 let refreshTimer = null;
+let configSetupTimer = null;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -68,9 +70,35 @@ let selectedItems = {
 exports.activate = function () {
   resetRateLimitFlag();
 
-  updateContextAvailability();
+  // All config-touching setup runs deferred: Nova config observers fire
+  // once with the current value at registration, and config traffic
+  // during activation contends with other extensions' traffic behind
+  // Nova's writer-priority config lock (deadlock window — see the
+  // conventions in AGENTS.md). activate() itself performs none.
+  function setupConfiguration() {
+    updateContextAvailability();
+    setupAutoRefreshAndObservers();
+    observeMaxRecentItems();
+    updateRepoViews(); // initial repos list (config reads — deferred)
+    observeRepoListChanges();
+    startDetection();
+    observeTokenSetting();
+    initialLoad();
+  }
+  configSetupTimer = setTimeout(() => {
+    configSetupTimer = null;
+    setupConfiguration();
+  }, 0);
 
   // 6) Auto-refresh every 5 Minutes
+  function setupAutoRefreshAndObservers() {
+    nova.config.observe(
+      "github.refreshInterval",
+      skipInitialCall(setupAutoRefresh),
+    );
+    setupAutoRefresh(); // run once immediately
+  }
+
   function setupAutoRefresh() {
     if (refreshTimer) clearInterval(refreshTimer);
 
@@ -117,46 +145,48 @@ exports.activate = function () {
     doRefresh();
   }
 
-  nova.config.observe("github.refreshInterval", setupAutoRefresh);
-  setupAutoRefresh(); // run once immediately
+  function observeMaxRecentItems() {
+    nova.config.observe(
+      "github.maxRecentItems",
+      skipInitialCall(() => {
+        if (!isConfigReady()) {
+          console.warn("[maxRecentItems] Skipped – config incomplete");
+          return;
+        }
+        if (
+          !openProvider ||
+          !closedProvider ||
+          !openPRProvider ||
+          !closedPRProvider
+        )
+          return;
 
-  nova.config.observe("github.maxRecentItems", () => {
-    if (!isConfigReady()) {
-      console.warn("[maxRecentItems] Skipped – config incomplete");
-      return;
-    }
-    if (
-      !openProvider ||
-      !closedProvider ||
-      !openPRProvider ||
-      !closedPRProvider
-    )
-      return;
+        dataStore.cache = {};
+        dataStore.etags = {};
 
-    dataStore.cache = {};
-    dataStore.etags = {};
-
-    const { token, owner, repo } = loadConfig();
-    Promise.all([
-      dataStore.fetchState("issue", "open", token, owner, repo),
-      dataStore.fetchState("issue", "closed", token, owner, repo),
-      dataStore.fetchState("pull", "open", token, owner, repo),
-      dataStore.fetchState("pull", "closed", token, owner, repo),
-    ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
-      openProvider
-        .refreshWithData(openIssues)
-        .then((c) => c && openView.reload());
-      closedProvider
-        .refreshWithData(closedIssues)
-        .then((c) => c && closedView.reload());
-      openPRProvider
-        .refreshWithData(openPRs)
-        .then((c) => c && openPRView.reload());
-      closedPRProvider
-        .refreshWithData(closedPRs)
-        .then((c) => c && closedPRView.reload());
-    });
-  });
+        const { token, owner, repo } = loadConfig();
+        Promise.all([
+          dataStore.fetchState("issue", "open", token, owner, repo),
+          dataStore.fetchState("issue", "closed", token, owner, repo),
+          dataStore.fetchState("pull", "open", token, owner, repo),
+          dataStore.fetchState("pull", "closed", token, owner, repo),
+        ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
+          openProvider
+            .refreshWithData(openIssues)
+            .then((c) => c && openView.reload());
+          closedProvider
+            .refreshWithData(closedIssues)
+            .then((c) => c && closedView.reload());
+          openPRProvider
+            .refreshWithData(openPRs)
+            .then((c) => c && openPRView.reload());
+          closedPRProvider
+            .refreshWithData(closedPRs)
+            .then((c) => c && closedPRView.reload());
+        });
+      }),
+    );
+  }
 
   // ensure your extension's global storage folder exists
   ensureDirExists(cacheDir);
@@ -274,8 +304,14 @@ exports.activate = function () {
       reposView.reload(); // tell Nova to repaint the UI
     }, 0);
   };
-  nova.config.observe("github.repos", updateRepoViews);
-  nova.workspace.config.observe("github.repos", updateRepoViews);
+
+  function observeRepoListChanges() {
+    nova.config.observe("github.repos", skipInitialCall(updateRepoViews));
+    nova.workspace.config.observe(
+      "github.repos",
+      skipInitialCall(updateRepoViews),
+    );
+  }
 
   // 7) Auto-detect the workspace's GitHub repo from .git/config.
   //    Same account + repo already in the list: switch to it silently.
@@ -343,36 +379,40 @@ exports.activate = function () {
       provider.configChanged();
     }
   }
-  loadDetections();
-  applyDetectedRepo();
-  nova.workspace.onDidChangePath(() => {
-    detectionAppliedPath = null;
+  function startDetection() {
     loadDetections();
     applyDetectedRepo();
-  });
+    nova.workspace.onDidChangePath(() => {
+      detectionAppliedPath = null;
+      loadDetections();
+      applyDetectedRepo();
+    });
+  }
 
   // Move the token from the settings field into the Keychain
-  nova.config.observe("github.token", (newValue) => {
-    const owner = resolveOwner() || "default";
-    if (newValue === "") {
-      // cancel any pending save, then remove immediately
-      if (tokenSaveTimer) {
-        clearTimeout(tokenSaveTimer);
-        tokenSaveTimer = null;
-        tokenSavePayload = null;
+  function observeTokenSetting() {
+    nova.config.observe("github.token", (newValue) => {
+      const owner = resolveOwner() || "default";
+      if (newValue === "") {
+        // cancel any pending save, then remove immediately
+        if (tokenSaveTimer) {
+          clearTimeout(tokenSaveTimer);
+          tokenSaveTimer = null;
+          tokenSavePayload = null;
+        }
+        nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
+        console.log("[Config] GitHub token removed from Keychain");
+      } else if (
+        typeof newValue === "string" &&
+        newValue.length >= 20 && // plausible token; ignore partial edits
+        newValue !== "***"
+      ) {
+        tokenSavePayload = { owner, token: newValue };
+        if (tokenSaveTimer) clearTimeout(tokenSaveTimer);
+        tokenSaveTimer = setTimeout(flushTokenSave, 250);
       }
-      nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
-      console.log("[Config] GitHub token removed from Keychain");
-    } else if (
-      typeof newValue === "string" &&
-      newValue.length >= 20 && // plausible token; ignore partial edits
-      newValue !== "***"
-    ) {
-      tokenSavePayload = { owner, token: newValue };
-      if (tokenSaveTimer) clearTimeout(tokenSaveTimer);
-      tokenSaveTimer = setTimeout(flushTokenSave, 250);
-    }
-  });
+    });
+  }
 
   function clearOtherSelections(currentKey) {
     for (const key of Object.keys(selectedItems)) {
@@ -398,7 +438,7 @@ exports.activate = function () {
   });
 
   // 3) Initial load (only if it’s been longer than a full interval)
-  (async () => {
+  async function initialLoad() {
     const now = Date.now();
     const { refreshInterval } = loadConfig();
 
@@ -449,7 +489,7 @@ exports.activate = function () {
 
     // record that we just did our “initial” fetch
     setLastRefresh(now);
-  })();
+  }
 
   // 4) “Refresh” runs both
   nova.commands.register("github-issues.refresh", async () => {
@@ -583,6 +623,12 @@ exports.activate = function () {
 
 exports.deactivate = function () {
   flushTokenSave();
+  // cancel deferred configuration so a disposed extension never
+  // registers observers or touches config
+  if (configSetupTimer) {
+    clearTimeout(configSetupTimer);
+    configSetupTimer = null;
+  }
   if (refreshTimer) {
     clearInterval(refreshTimer);
     refreshTimer = null;

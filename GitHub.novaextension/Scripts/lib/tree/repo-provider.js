@@ -10,8 +10,9 @@ const {
 
 class GitHubRepoProvider {
   constructor() {
+    // Starts empty: updateRepoList() reads config, so it runs in the
+    // deferred configuration step (never during activation).
     this.rootItems = [];
-    this.updateRepoList();
   }
 
   updateRepoList() {

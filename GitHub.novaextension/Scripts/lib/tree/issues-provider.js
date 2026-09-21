@@ -12,6 +12,7 @@ const {
   isConfigReady,
   updateContextAvailability,
   invalidateConfigCache,
+  skipInitialCall,
 } = require("../config.js");
 const { hexToRgb, IssueItem } = require("./item.js");
 
@@ -28,10 +29,16 @@ class GitHubIssuesProvider {
     // Bursts of change events (e.g. keystrokes in a settings field) are
     // coalesced: only the last event within 500ms triggers a refresh.
     for (const key of ["github.token", "github.owner"]) {
-      nova.config.observe(key, () => this.scheduleRefresh());
+      nova.config.observe(
+        key,
+        skipInitialCall(() => this.scheduleRefresh()),
+      );
     }
     for (const key of ["github.owner", "github.repo"]) {
-      nova.workspace.config.observe(key, () => this.scheduleRefresh());
+      nova.workspace.config.observe(
+        key,
+        skipInitialCall(() => this.scheduleRefresh()),
+      );
     }
   }
 

@@ -147,6 +147,22 @@ function toNumber(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+// Nova config observers fire once with the current value at
+// registration. That initial notification must not reach our
+// callbacks — they would re-enter config reads during activation,
+// widening the deadlock window with other extensions. Only real
+// changes are forwarded. (Same pattern as nova-prettier-extension.)
+function skipInitialCall(fn) {
+  let skipped = false;
+  return function (...args) {
+    if (!skipped) {
+      skipped = true;
+      return;
+    }
+    fn.apply(this, args);
+  };
+}
+
 function loadConfig() {
   const now = Date.now();
   if (configCache && now - configCacheAt < CONFIG_CACHE_TTL) {
@@ -248,4 +264,5 @@ module.exports = {
   saveDetectionForWorkspace,
   setGlobalConfig,
   setWorkspaceConfig,
+  skipInitialCall,
 };
