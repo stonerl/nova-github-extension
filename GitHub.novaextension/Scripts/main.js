@@ -3,6 +3,7 @@
 const CREDENTIALS_SERVICE = "github-for-nova";
 
 let isRateLimited = false;
+let refreshTimer = null;
 
 function resetRateLimitFlag() {
   isRateLimited = false;
@@ -383,8 +384,6 @@ exports.activate = function () {
   updateContextAvailability();
 
   // 6) Auto-refresh every 5 Minutes
-  let refreshTimer = null;
-
   function setupAutoRefresh() {
     if (refreshTimer) clearInterval(refreshTimer);
 
@@ -814,7 +813,10 @@ exports.activate = function () {
 };
 
 exports.deactivate = function () {
-  /* nothing */
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
 };
 
 function hexToRgb(hex) {
