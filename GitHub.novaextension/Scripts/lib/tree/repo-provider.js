@@ -16,7 +16,9 @@ class GitHubRepoProvider {
     // 2) figure out the “current” repo
     let currentRepo = nova.workspace.config.get("github.repo");
 
-    // 3) if none is set or it’s not in the list, pick the first one
+    // 3) if none is set or it’s not in the list, pick the first one.
+    //    With no repos configured at all, the stale persisted value
+    //    is ignored — an empty section beats a phantom repo.
     if (!currentRepo || !repos.includes(currentRepo)) {
       if (repos.length > 0) {
         currentRepo = repos[0];
@@ -25,6 +27,8 @@ class GitHubRepoProvider {
         console.log(
           `[RepoSelect] No valid current repo, defaulting to "${currentRepo}"`,
         );
+      } else {
+        currentRepo = null;
       }
     }
 
