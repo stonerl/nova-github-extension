@@ -1,3 +1,19 @@
+## Version 0.7.0
+
+- Automatic repository detection: opening a GitHub checkout offers its
+  repository from `.git/config`. Same account + configured repo → set
+  as this workspace's active repo automatically; different account or
+  unknown repo → one-time confirmation dialog
+- Lazy comment loading: comments fetch when a Comments group is
+  expanded instead of all up front, and request concurrency is capped
+- Rate-limit handling hardened: the limit flag is held at least 60s,
+  warnings are logged once per window, and identical concurrent
+  requests share one network call
+- Fixed: config values resolve with an explicit global fallback and
+  are cached, eliminating freezes from config read/write storms
+- Fixed: stale workspace repo values no longer show when no
+  repositories are configured
+
 ## Version 0.6.1
 
 - Workspace settings UI: GitHub Username and Repositories can now be
