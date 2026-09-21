@@ -78,6 +78,10 @@ exports.activate = function () {
   // Nova's writer-priority config lock (deadlock window — see the
   // conventions in AGENTS.md). activate() itself performs none.
   function setupConfiguration() {
+    // Detection memory first: everything below resolves owner/repo, and
+    // loadConfig() caches its result — a cache primed before detections
+    // load makes applyDetectedRepo see a stale owner and re-prompt.
+    loadDetections();
     updateContextAvailability();
     setupAutoRefreshAndObservers();
     observeMaxRecentItems();
@@ -357,10 +361,14 @@ exports.activate = function () {
   }
   function startDetection() {
     loadDetections();
+    // Belt+braces: a config cache primed before the detection load (e.g.
+    // on workspace path change) must not leak into the decision below.
+    invalidateConfigCache();
     applyDetectedRepo();
     nova.workspace.onDidChangePath(() => {
       detectionAppliedPath = null;
       loadDetections();
+      invalidateConfigCache();
       applyDetectedRepo();
     });
   }
