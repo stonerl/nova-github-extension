@@ -13,53 +13,62 @@ function showThrottled(key, fn) {
   fn();
 }
 
+// Nova versions differ: showErrorMessage/showWarningMessage may return
+// a Promise or nothing at all. Calling .catch on undefined throws —
+// so handle every shape defensively; the console log keeps details.
+function showAlert(method, message) {
+  try {
+    const result = method.call(nova.workspace, message);
+    if (result && typeof result.catch === "function") {
+      result.catch(() => {});
+    }
+  } catch {
+    // alert display failed — the console log still has the details
+  }
+}
+
 function networkError() {
   showThrottled("network", () =>
-    nova.workspace
-      .showErrorMessage(
-        "GitHub is unreachable — check your internet connection. Cached data is shown where available.",
-      )
-      .catch(() => {}),
+    showAlert(
+      nova.workspace.showErrorMessage,
+      "GitHub is unreachable — check your internet connection. Cached data is shown where available.",
+    ),
   );
 }
 
 function authError() {
   showThrottled("auth", () =>
-    nova.workspace
-      .showErrorMessage(
-        "GitHub rejected your token (401). Check the Personal Access Token in the extension settings.",
-      )
-      .catch(() => {}),
+    showAlert(
+      nova.workspace.showErrorMessage,
+      "GitHub rejected your token (401). Check the Personal Access Token in the extension settings.",
+    ),
   );
 }
 
 function forbiddenError() {
   showThrottled("forbidden", () =>
-    nova.workspace
-      .showWarningMessage(
-        "GitHub denied the request (403). Your token may be missing scopes (public_repo / repo), or the repository may be inaccessible.",
-      )
-      .catch(() => {}),
+    showAlert(
+      nova.workspace.showWarningMessage,
+      "GitHub denied the request (403). Your token may be missing scopes (public_repo / repo), or the repository may be inaccessible.",
+    ),
   );
 }
 
 function rateLimitError() {
   showThrottled("rate-limit", () =>
-    nova.workspace
-      .showWarningMessage(
-        "GitHub API rate limit reached. Retrying automatically after the limit resets.",
-      )
-      .catch(() => {}),
+    showAlert(
+      nova.workspace.showWarningMessage,
+      "GitHub API rate limit reached. Retrying automatically after the limit resets.",
+    ),
   );
 }
 
 function configIncomplete() {
   showThrottled("config", () =>
-    nova.workspace
-      .showWarningMessage(
-        "GitHub extension not configured — set Username, Token, and Repositories in the extension settings.",
-      )
-      .catch(() => {}),
+    showAlert(
+      nova.workspace.showWarningMessage,
+      "GitHub extension not configured — set Username, Token, and Repositories in the extension settings.",
+    ),
   );
 }
 
