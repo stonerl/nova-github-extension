@@ -27,15 +27,6 @@ function showAlert(method, message) {
   }
 }
 
-function networkError() {
-  showThrottled("network", () =>
-    showAlert(
-      nova.workspace.showErrorMessage,
-      "GitHub is unreachable — check your internet connection. Cached data is shown where available.",
-    ),
-  );
-}
-
 function authError() {
   showThrottled("auth", () =>
     showAlert(
@@ -82,7 +73,6 @@ function configIncomplete() {
 }
 
 module.exports = {
-  networkError,
   authError,
   forbiddenError,
   rateLimitError,

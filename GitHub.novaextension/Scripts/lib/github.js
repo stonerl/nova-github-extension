@@ -205,7 +205,6 @@ const dataStore = {
       return allItems;
     } catch (err) {
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
-      if (!err || !err.handled) notify.networkError();
       const disk = loadCache(state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
@@ -265,7 +264,6 @@ async function fetchCommentsForIssue(
     return data;
   } catch (err) {
     console.warn(`[Comments] Fetch failed for issue #${issueNumber}:`, err);
-    if (!err || !err.handled) notify.networkError();
     return cache?.data || [];
   }
 }
@@ -318,7 +316,6 @@ async function fetchReviewComments(
     return data;
   } catch (err) {
     console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
-    if (!err || !err.handled) notify.networkError();
     return cache?.data || [];
   }
 }
