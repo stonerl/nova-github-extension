@@ -447,10 +447,8 @@ exports.activate = function () {
     )
       return;
 
-    dataStore.cache.open = null;
-    dataStore.cache.closed = null;
-    dataStore.etags.open = null;
-    dataStore.etags.closed = null;
+    dataStore.cache = {};
+    dataStore.etags = {};
 
     const { token, owner, repo } = loadConfig();
     Promise.all([
