@@ -23,19 +23,17 @@ class GitHubIssuesProvider {
     this.itemMap = new WeakMap();
     this.initialized = false;
 
-    // re-fetch if config changes
-    for (const key of ["github.token", "github.owner"]) {
-      nova.config.observe(key, () => {
-        updateContextAvailability();
-        if (isConfigReady()) this.refresh(true);
-      });
-    }
-
-    // Handle workspace config separately
-    nova.workspace.config.observe("github.repo", () => {
+    // re-fetch if config changes (global or workspace-scoped)
+    const refreshWhenReady = () => {
       updateContextAvailability();
       if (isConfigReady()) this.refresh(true);
-    });
+    };
+    for (const key of ["github.token", "github.owner"]) {
+      nova.config.observe(key, refreshWhenReady);
+    }
+    for (const key of ["github.owner", "github.repo"]) {
+      nova.workspace.config.observe(key, refreshWhenReady);
+    }
   }
 
   async refresh(force = false) {

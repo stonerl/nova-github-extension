@@ -227,10 +227,12 @@ exports.activate = function () {
     reposView.reload();
   });
 
-  nova.config.observe("github.repos", () => {
+  const updateRepoViews = () => {
     reposProvider.updateRepoList();
     reposView.reload(); // tell Nova to repaint the UI
-  });
+  };
+  nova.config.observe("github.repos", updateRepoViews);
+  nova.workspace.config.observe("github.repos", updateRepoViews);
 
   // Move the token from the settings field into the Keychain
   nova.config.observe("github.token", (newValue) => {
