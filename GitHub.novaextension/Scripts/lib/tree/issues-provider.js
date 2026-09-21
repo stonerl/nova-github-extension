@@ -268,12 +268,20 @@ class GitHubIssuesProvider {
         // 6d) Comments & review‐comments
         const comments =
           i.comments > 0
-            ? await fetchCommentsForIssue(i.number, i.comments)
+            ? await fetchCommentsForIssue(i.number, i.comments, {
+                token,
+                owner,
+                repo,
+              })
             : [];
 
         const reviewComments =
           this.type === "pull" && i.review_comments > 0
-            ? await fetchReviewComments(i.number, i.review_comments)
+            ? await fetchReviewComments(i.number, i.review_comments, {
+                token,
+                owner,
+                repo,
+              })
             : [];
         const allComments = [...comments, ...reviewComments];
 

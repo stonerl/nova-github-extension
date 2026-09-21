@@ -315,10 +315,12 @@ exports.activate = function () {
         )}s since last — loading from cache instead`,
       );
       // load whatever’s on disk and populate the views
-      const cachedOpenIssues = loadCache("issue", "open") || [];
-      const cachedClosedIssues = loadCache("issue", "closed") || [];
-      const cachedOpenPRs = loadCache("pull", "open") || [];
-      const cachedClosedPRs = loadCache("pull", "closed") || [];
+      const { owner, repo } = loadConfig();
+      const cachedOpenIssues = loadCache("issue", "open", owner, repo) || [];
+      const cachedClosedIssues =
+        loadCache("issue", "closed", owner, repo) || [];
+      const cachedOpenPRs = loadCache("pull", "open", owner, repo) || [];
+      const cachedClosedPRs = loadCache("pull", "closed", owner, repo) || [];
 
       await openProvider.refreshWithData(cachedOpenIssues);
       await closedProvider.refreshWithData(cachedClosedIssues);

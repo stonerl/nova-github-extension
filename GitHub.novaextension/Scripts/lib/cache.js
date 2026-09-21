@@ -1,8 +1,8 @@
 // lib/cache.js
 // Disk cache for issues/PRs and comments, stored per owner/repo
-// under the extension's global storage.
-
-const { loadConfig } = require("./config.js");
+// under the extension's global storage. Owner/repo are passed in by
+// callers — reading them from config on every cache access caused a
+// config IPC storm in the Nova app process.
 
 const cacheDir = `${nova.extension.globalStoragePath}/cache`;
 
@@ -15,17 +15,18 @@ function ensureDirExists(dir) {
   }
 }
 
-function cachePath(type, state) {
-  const { owner, repo } = loadConfig();
+function repoDirFor(owner, repo) {
   const repoDir = `${cacheDir}/${owner}-${repo}`;
-
   ensureDirExists(repoDir);
-
-  return `${repoDir}/${type}-${state}.json`; // e.g. pull-open.json
+  return repoDir;
 }
 
-function saveCache(type, state, data) {
-  const path = cachePath(type, state);
+function cachePath(type, state, owner, repo) {
+  return `${repoDirFor(owner, repo)}/${type}-${state}.json`; // e.g. pull-open.json
+}
+
+function saveCache(type, state, data, owner, repo) {
+  const path = cachePath(type, state, owner, repo);
   try {
     const file = nova.fs.open(path, "w+t");
     file.write(JSON.stringify(data));
@@ -35,8 +36,8 @@ function saveCache(type, state, data) {
   }
 }
 
-function loadCache(type, state) {
-  const path = cachePath(type, state);
+function loadCache(type, state, owner, repo) {
+  const path = cachePath(type, state, owner, repo);
   try {
     const file = nova.fs.open(path, "r");
     const text = file.read();
@@ -47,15 +48,12 @@ function loadCache(type, state) {
   }
 }
 
-function commentCachePath(type, number) {
-  const { owner, repo } = loadConfig();
-  const repoDir = `${cacheDir}/${owner}-${repo}`;
-  ensureDirExists(repoDir);
-  return `${repoDir}/comments-${type}-${number}.json`;
+function commentCachePath(type, number, owner, repo) {
+  return `${repoDirFor(owner, repo)}/comments-${type}-${number}.json`;
 }
 
-function saveCommentCache(type, number, etag, data) {
-  const path = commentCachePath(type, number);
+function saveCommentCache(type, number, etag, data, owner, repo) {
+  const path = commentCachePath(type, number, owner, repo);
   const payload = { etag, data };
   try {
     // 'w+t' will create the file if it doesn't exist
@@ -67,8 +65,8 @@ function saveCommentCache(type, number, etag, data) {
   }
 }
 
-function loadCommentCache(type, number) {
-  const path = commentCachePath(type, number);
+function loadCommentCache(type, number, owner, repo) {
+  const path = commentCachePath(type, number, owner, repo);
   try {
     const file = nova.fs.open(path, "r");
     const text = file.read();
@@ -83,6 +81,7 @@ function loadCommentCache(type, number) {
 module.exports = {
   cacheDir,
   ensureDirExists,
+  repoDirFor,
   cachePath,
   saveCache,
   loadCache,

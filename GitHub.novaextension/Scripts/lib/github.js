@@ -39,7 +39,7 @@ const dataStore = {
     const key = `${type}-${state}`;
     if (isRateLimited) {
       console.warn(`[GitHub] Skipping fetchState(${state}) due to rate-limit`);
-      const disk = loadCache(type, state);
+      const disk = loadCache(type, state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
         return disk;
@@ -76,7 +76,7 @@ const dataStore = {
         const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
         if (remaining === 0) {
           applyRateLimit(resetAt, "issues");
-          const disk = loadCache(type, state);
+          const disk = loadCache(type, state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
             return disk;
@@ -85,7 +85,7 @@ const dataStore = {
         }
 
         if (resp.status === 304) {
-          const disk = loadCache(type, state);
+          const disk = loadCache(type, state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
             return disk;
@@ -119,11 +119,11 @@ const dataStore = {
       }
 
       this.cache[key] = allItems;
-      saveCache(type, state, allItems);
+      saveCache(type, state, allItems, owner, repo);
       return allItems;
     } catch (err) {
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
-      const disk = loadCache(type, state);
+      const disk = loadCache(type, state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
         return disk;
@@ -134,13 +134,16 @@ const dataStore = {
   },
 };
 
-async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
-  const cache = loadCommentCache("issue", issueNumber);
+async function fetchCommentsForIssue(
+  issueNumber,
+  expectedCount,
+  { token, owner, repo },
+) {
+  const cache = loadCommentCache("issue", issueNumber, owner, repo);
 
   if (isRateLimited) return cache?.data || [];
   if (cache?.count === expectedCount) return cache.data;
 
-  const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
   const headers = {
     Authorization: `token ${token}`,
@@ -161,7 +164,7 @@ async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
 
     const data = await resp.json();
     const etag = resp.headers.get("etag");
-    saveCommentCache("issue", issueNumber, etag, data);
+    saveCommentCache("issue", issueNumber, etag, data, owner, repo);
     return data;
   } catch (err) {
     console.warn(`[Comments] Fetch failed for issue #${issueNumber}:`, err);
@@ -169,13 +172,16 @@ async function fetchCommentsForIssue(issueNumber, expectedCount = 0) {
   }
 }
 
-async function fetchReviewComments(pullNumber, expectedCount = 0) {
-  const cache = loadCommentCache("pull", pullNumber);
+async function fetchReviewComments(
+  pullNumber,
+  expectedCount,
+  { token, owner, repo },
+) {
+  const cache = loadCommentCache("pull", pullNumber, owner, repo);
 
   if (isRateLimited) return cache?.data || [];
   if (cache?.count === expectedCount) return cache.data;
 
-  const { token, owner, repo } = loadConfig();
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
   const headers = {
     Authorization: `token ${token}`,
@@ -196,7 +202,7 @@ async function fetchReviewComments(pullNumber, expectedCount = 0) {
 
     const data = await resp.json();
     const etag = resp.headers.get("etag");
-    saveCommentCache("pull", pullNumber, etag, data);
+    saveCommentCache("pull", pullNumber, etag, data, owner, repo);
     return data;
   } catch (err) {
     console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
