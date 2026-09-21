@@ -31,14 +31,24 @@ test("missing files degrade to null / empty comment cache", () => {
     etag: null,
     data: [],
     count: 0,
+    issueUpdatedAt: null,
   });
 });
 
 test("comment cache stores etag + data + count", () => {
   const cache = setup();
-  cache.saveCommentCache("issue", 7, '"etag1"', [{ id: 9 }], "o", "r");
+  cache.saveCommentCache(
+    "issue",
+    7,
+    '"etag1"',
+    [{ id: 9 }],
+    "2026-01-01T00:00:00Z",
+    "o",
+    "r",
+  );
   const loaded = cache.loadCommentCache("issue", 7, "o", "r");
   assert.equal(loaded.etag, '"etag1"');
   assert.equal(loaded.count, 1);
+  assert.equal(loaded.issueUpdatedAt, "2026-01-01T00:00:00Z");
   assert.deepEqual(loaded.data, [{ id: 9 }]);
 });

@@ -306,6 +306,7 @@ class GitHubIssuesProvider {
           number: i.number,
           issueComments: i.comments || 0,
           reviewComments: this.type === "pull" ? i.review_comments || 0 : 0,
+          parentUpdatedAt: i.updated_at,
           cfg: { token, owner, repo },
         };
 
@@ -329,11 +330,21 @@ class GitHubIssuesProvider {
     const src = group.commentSource;
     const issueFetch =
       src.issueComments > 0
-        ? fetchCommentsForIssue(src.number, src.issueComments, src.cfg)
+        ? fetchCommentsForIssue(
+            src.number,
+            src.issueComments,
+            src.cfg,
+            src.parentUpdatedAt,
+          )
         : Promise.resolve([]);
     const reviewFetch =
       src.reviewComments > 0
-        ? fetchReviewComments(src.number, src.reviewComments, src.cfg)
+        ? fetchReviewComments(
+            src.number,
+            src.reviewComments,
+            src.cfg,
+            src.parentUpdatedAt,
+          )
         : Promise.resolve([]);
 
     group.commentsPending = Promise.all([issueFetch, reviewFetch])

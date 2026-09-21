@@ -20,7 +20,12 @@ const {
   skipInitialCall,
   CREDENTIALS_SERVICE,
 } = require("./lib/config.js");
-const { cacheDir, ensureDirExists, loadCache } = require("./lib/cache.js");
+const {
+  cacheDir,
+  ensureDirExists,
+  loadCache,
+  pruneCaches,
+} = require("./lib/cache.js");
 const { dataStore, resetRateLimitFlag } = require("./lib/github.js");
 const { GitHubIssuesProvider } = require("./lib/tree/issues-provider.js");
 const { GitHubRepoProvider } = require("./lib/tree/repo-provider.js");
@@ -126,7 +131,6 @@ exports.activate = function () {
         );
         return;
       }
-
       const { token, owner, repo } = loadConfig();
       const [openData, closedData] = await Promise.all([
         dataStore.fetchState("open", token, owner, repo),
@@ -138,6 +142,10 @@ exports.activate = function () {
       if (await closedProvider.refreshWithData(closedData)) closedView.reload();
       if (await closedPRProvider.refreshWithData(closedData))
         closedPRView.reload();
+
+      // Full cycle succeeded — prune caches for items that vanished.
+      const keepNumbers = [...openData, ...closedData].map((i) => i.number);
+      pruneCaches(owner, repo, keepNumbers);
 
       setLastRefresh(now);
       console.log("[Auto-refresh] Views updated");
@@ -495,6 +503,10 @@ exports.activate = function () {
     if (await closedProvider.refreshWithData(closedData)) closedView.reload();
     if (await closedPRProvider.refreshWithData(closedData))
       closedPRView.reload();
+
+    // Full cycle succeeded — prune caches for items that vanished.
+    const keepNumbers = [...openData, ...closedData].map((i) => i.number);
+    pruneCaches(owner, repo, keepNumbers);
   });
 
   nova.commands.register("github-issues.newIssue", () => {
@@ -695,41 +707,18 @@ async function updateIssueState(newState, reason) {
         `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ""}`,
       );
 
-      // Patch local model
-      root.issue.state = newState;
-      root.issue.state_reason = reason ?? null;
-      root.issue.closed_at =
-        newState === "closed" ? new Date().toISOString() : null;
-      root.issue.updated_at = new Date().toISOString();
+      // The server state changed — drop cached lists + ETags so the
+      // provider refreshes refetch instead of revalidating to 304s,
+      // then let each issue provider rebuild from its own request.
+      delete dataStore.cache["open"];
+      delete dataStore.cache["closed"];
+      delete dataStore.etags["open"];
+      delete dataStore.etags["closed"];
 
-      // Move in cache
-      const keyFrom = `issue-${newState === "closed" ? "open" : "closed"}`;
-      const keyTo = `issue-${newState}`;
-
-      dataStore.cache[keyFrom] = (dataStore.cache[keyFrom] || []).filter(
-        (i) => i.id !== root.issue.id,
-      );
-      dataStore.cache[keyTo] = [root.issue, ...(dataStore.cache[keyTo] || [])];
-
-      const fromProvider =
-        newState === "closed" ? openProvider : closedProvider;
-      const toProvider = newState === "closed" ? closedProvider : openProvider;
-
-      // Remove from old provider's list
-      fromProvider.rootItems = fromProvider.rootItems.filter(
-        (item) => item.issue.id !== root.issue.id,
-      );
-      fromProvider.itemsById.delete(String(root.issue.id));
-
-      // Add to new provider
-      toProvider.rootItems.unshift(root);
-      toProvider.itemsById.set(String(root.issue.id), root);
-
-      // Reload both views to reflect state change
-      await openProvider.refreshWithData(dataStore.cache["issue-open"] || []);
-      await closedProvider.refreshWithData(
-        dataStore.cache["issue-closed"] || [],
-      );
+      await Promise.all([
+        openProvider.refresh(true),
+        closedProvider.refresh(true),
+      ]);
       openView.reload();
       closedView.reload();
     } else {

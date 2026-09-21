@@ -202,6 +202,31 @@ function createNovaStub(options = {}) {
           }
           throw new Error("File exists");
         },
+        listdir(dir) {
+          const prefix = dir.endsWith("/") ? dir : dir + "/";
+          const names = new Set();
+          for (const p of Object.keys(stub.files)) {
+            if (p.startsWith(prefix))
+              names.add(p.slice(prefix.length).split("/")[0]);
+          }
+          for (const d of stub.existingDirs) {
+            if (d.startsWith(prefix))
+              names.add(d.slice(prefix.length).split("/")[0]);
+          }
+          if (names.size === 0 && !stub.existingDirs.has(dir)) {
+            throw new Error("No such directory");
+          }
+          return [...names];
+        },
+        remove(path) {
+          delete stub.files[path]; // Nova: missing file = no-op
+        },
+        rmdir(path) {
+          stub.existingDirs.delete(path);
+          for (const p of Object.keys(stub.files)) {
+            if (p.startsWith(path + "/")) delete stub.files[p];
+          }
+        },
         open(path, mode) {
           if (String(mode).includes("w")) {
             return {

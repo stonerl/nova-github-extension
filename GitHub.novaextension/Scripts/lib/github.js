@@ -220,11 +220,19 @@ async function fetchCommentsForIssue(
   issueNumber,
   expectedCount,
   { token, owner, repo },
+  issueUpdatedAt = null,
 ) {
   const cache = loadCommentCache("issue", issueNumber, owner, repo);
 
   if (isRateLimited) return cache?.data || [];
-  if (cache?.count === expectedCount) return cache.data;
+  // Count alone can't detect a delete+add (same count, different
+  // comments) — the parent item's updated_at bumps on either.
+  if (
+    cache?.count === expectedCount &&
+    cache?.issueUpdatedAt === issueUpdatedAt
+  ) {
+    return cache.data;
+  }
 
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`;
   const headers = {
@@ -260,7 +268,15 @@ async function fetchCommentsForIssue(
 
     const data = await resp.json();
     const etag = resp.headers.get("etag");
-    saveCommentCache("issue", issueNumber, etag, data, owner, repo);
+    saveCommentCache(
+      "issue",
+      issueNumber,
+      etag,
+      data,
+      issueUpdatedAt,
+      owner,
+      repo,
+    );
     return data;
   } catch (err) {
     console.warn(`[Comments] Fetch failed for issue #${issueNumber}:`, err);
@@ -272,11 +288,17 @@ async function fetchReviewComments(
   pullNumber,
   expectedCount,
   { token, owner, repo },
+  issueUpdatedAt = null,
 ) {
   const cache = loadCommentCache("pull", pullNumber, owner, repo);
 
   if (isRateLimited) return cache?.data || [];
-  if (cache?.count === expectedCount) return cache.data;
+  if (
+    cache?.count === expectedCount &&
+    cache?.issueUpdatedAt === issueUpdatedAt
+  ) {
+    return cache.data;
+  }
 
   const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/comments`;
   const headers = {
@@ -312,7 +334,15 @@ async function fetchReviewComments(
 
     const data = await resp.json();
     const etag = resp.headers.get("etag");
-    saveCommentCache("pull", pullNumber, etag, data, owner, repo);
+    saveCommentCache(
+      "pull",
+      pullNumber,
+      etag,
+      data,
+      issueUpdatedAt,
+      owner,
+      repo,
+    );
     return data;
   } catch (err) {
     console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
