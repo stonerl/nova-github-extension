@@ -1,3 +1,28 @@
+## Version 0.8.0
+
+- Detected repositories are now manageable: right-click a detected row
+  in the Repositories section and choose **Forget Detection** to remove
+  it; detected rows are also clickable like configured ones
+- Detection storage moved out of Nova's configuration system into the
+  extension's own storage — nothing is written to Nova settings or the
+  project's `.nova` folder, and already-detected workspaces no longer
+  re-prompt
+- Error messages: the extension now shows alerts for 401 (bad token),
+  403 (missing scopes), 404 (no access or deleted repo — once per
+  session), rate-limit hits, and a low API budget, instead of failing
+  silently with an empty sidebar
+- Halved the number of list requests: issues and pull requests of the
+  same state share one request
+- Auto-refresh pauses when the API budget is low and serves cached
+  data until the limit resets; manual refresh always works
+- Comment caches validate against the parent item's timestamp, so
+  comment changes refetch even when the count is unchanged
+- Disk caches are pruned after successful refreshes (removed items,
+  legacy files, orphaned directories)
+- Fixed: no config traffic during activation — with a second extension
+  also touching configuration, activation could deadlock Nova
+- Fixed: repo switching no longer fetches everything twice
+
 ## Version 0.7.0
 
 - Automatic repository detection: opening a GitHub checkout offers its

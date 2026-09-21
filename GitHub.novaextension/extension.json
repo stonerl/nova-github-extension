@@ -1,7 +1,7 @@
 {
   "identifier": "stonerl.GitHub",
   "organization": "Toni Förster",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "name": "GitHub",
   "description": "Browse, manage, and triage GitHub issues and pull requests directly from Nova’s sidebar.",
   "license": "MIT License",
