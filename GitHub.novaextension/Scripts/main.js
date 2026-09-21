@@ -19,6 +19,8 @@ const { parseGitConfig, decideDetection } = require("./lib/detect.js");
 
 let refreshTimer = null;
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Debounced token persistence: Nova commits settings fields on every
 // keystroke, and each config read/write crosses into the app process —
 // bursts can lock up Nova's config bridge. Coalesce into one write.
@@ -258,8 +260,12 @@ exports.activate = function () {
   });
 
   const updateRepoViews = () => {
-    reposProvider.updateRepoList();
-    reposView.reload(); // tell Nova to repaint the UI
+    // Deferred: this runs from config change notifications, and its
+    // config reads must not nest inside Nova's notification dispatch.
+    setTimeout(() => {
+      reposProvider.updateRepoList();
+      reposView.reload(); // tell Nova to repaint the UI
+    }, 0);
   };
   nova.config.observe("github.repos", updateRepoViews);
   nova.workspace.config.observe("github.repos", updateRepoViews);
@@ -294,21 +300,42 @@ exports.activate = function () {
       updateRepoViews();
     } else if (decision.type === "confirmNewAccount") {
       const label = `${decision.owner}/${decision.repo}`;
-      nova.workspace.showChoicePalette(
-        [`Use ${label} in this workspace`, "No thanks"],
-        { placeholder: `Found GitHub repository ${label}` },
-        (choice) => {
-          if (!choice || !choice.startsWith("Use ")) return;
-          nova.workspace.config.set("github.owner", decision.owner);
-          nova.workspace.config.set("github.repos", [decision.repo]);
-          nova.workspace.config.set("github.repo", decision.repo);
-          invalidateConfigCache();
-          console.log(
-            `[RepoSelect] Using detected repo ${label} for this workspace`,
-          );
-          updateRepoViews();
-        },
+      const request = new NotificationRequest("github-detect-repo");
+      request.title = `Found GitHub repository ${label}`;
+      request.body = `Use ${label} in this workspace? This stores the account and repositories for this project only.`;
+      request.actions = ["Use in this workspace", "No"];
+
+      nova.notifications
+        .add(request)
+        .then((response) => {
+          if (!response || response.actionIdx !== 0) return;
+          return applyDetectedAccount(decision);
+        })
+        .catch(() => {
+          // dismissed or failed — manual configuration still applies
+        });
+    }
+  }
+
+  // Applies the workspace-scoped writes for a detected repo. Each config
+  // write dispatches change notifications inside Nova's process; spacing
+  // them out keeps our subsequent reads from nesting in that dispatch.
+  async function applyDetectedAccount(decision) {
+    const label = `${decision.owner}/${decision.repo}`;
+    try {
+      nova.workspace.config.set("github.owner", decision.owner);
+      await wait(100);
+      nova.workspace.config.set("github.repos", [decision.repo]);
+      await wait(100);
+      nova.workspace.config.set("github.repo", decision.repo);
+      await wait(100);
+      invalidateConfigCache();
+      console.log(
+        `[RepoSelect] Using detected repo ${label} for this workspace`,
       );
+      updateRepoViews();
+    } catch (err) {
+      console.error("[RepoSelect] Failed to apply detected repo:", err);
     }
   }
   applyDetectedRepo();
