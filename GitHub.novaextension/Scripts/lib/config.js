@@ -1,13 +1,46 @@
 // lib/config.js
 // Extension settings, credentials, and readiness context.
+//
+// Nova semantics note: `nova.workspace.config.get(key)` only returns a
+// value that was explicitly set at the workspace level — it does NOT
+// fall back to the global extension preference. The workspace value is
+// therefore combined manually (workspace ?? global) below.
 
 const CREDENTIALS_SERVICE = "github-for-nova";
 
+// loadConfig() crosses into the Nova app process for every read (plus
+// a Keychain round-trip), so results are cached briefly. Call
+// invalidateConfigCache() after changing any github.* setting or
+// observing a change to one.
+const CONFIG_CACHE_TTL = 1000;
+let configCache = null;
+let configCacheAt = 0;
+
+function invalidateConfigCache() {
+  configCache = null;
+  configCacheAt = 0;
+}
+
+function readScoped(config, key) {
+  const workspaceValue = nova.workspace.config.get(key);
+  if (workspaceValue !== null && workspaceValue !== undefined) {
+    return workspaceValue;
+  }
+  return config.get(key);
+}
+
+function readSetting(key) {
+  return readScoped(nova.config, key);
+}
+
 function loadConfig() {
-  // 1) Owner is now mandatory. Read from the workspace scope first so
-  //    each project can use its own account (e.g. a work organization),
-  //    falling back to the global setting otherwise.
-  const owner = nova.workspace.config.get("github.owner");
+  const now = Date.now();
+  if (configCache && now - configCacheAt < CONFIG_CACHE_TTL) {
+    return configCache;
+  }
+
+  // 1) Owner is mandatory. Workspace override wins, global fallback.
+  const owner = readScoped(nova.config, "github.owner");
   if (!owner) {
     console.error("[Config] github.owner must be set");
     return { token: null, owner: null, repo: null /*…*/ };
@@ -35,7 +68,7 @@ function loadConfig() {
     console.warn("[Config] No GitHub token in Keychain for owner:", owner);
   }
 
-  return {
+  const result = {
     token,
     owner,
     repo: nova.workspace.config.get("github.repo"),
@@ -43,6 +76,10 @@ function loadConfig() {
     maxRecentItems: nova.config.get("github.maxRecentItems"),
     itemsPerPage: nova.config.get("github.itemsPerPage"),
   };
+
+  configCache = result;
+  configCacheAt = now;
+  return result;
 }
 
 function isConfigReady() {
@@ -50,8 +87,13 @@ function isConfigReady() {
   return !!(token && owner && repo);
 }
 
+let lastReadyValue = null;
+
 function updateContextAvailability() {
-  nova.workspace.context.set("github.ready", isConfigReady());
+  const ready = isConfigReady();
+  if (ready === lastReadyValue) return;
+  lastReadyValue = ready;
+  nova.workspace.context.set("github.ready", ready);
 }
 
 function getLastRefresh() {
@@ -73,4 +115,6 @@ module.exports = {
   updateContextAvailability,
   getLastRefresh,
   setLastRefresh,
+  invalidateConfigCache,
+  readSetting,
 };

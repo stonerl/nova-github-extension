@@ -7,6 +7,8 @@ const {
   updateContextAvailability,
   getLastRefresh,
   setLastRefresh,
+  invalidateConfigCache,
+  readSetting,
   CREDENTIALS_SERVICE,
 } = require("./lib/config.js");
 const { cacheDir, ensureDirExists, loadCache } = require("./lib/cache.js");
@@ -174,7 +176,7 @@ exports.activate = function () {
       return;
     }
 
-    const repos = nova.workspace.config.get("github.repos") || [];
+    const repos = readSetting("github.repos") || [];
     let newRepo = items[0]?.identifier;
 
     // if they didn’t actually pick one (or it’s no longer in the list),
@@ -186,6 +188,7 @@ exports.activate = function () {
       }
       newRepo = repos[0];
       nova.workspace.config.set("github.repo", newRepo);
+      invalidateConfigCache();
       console.log(
         `[RepoSelect] No valid selection → defaulting to "${newRepo}"`,
       );
@@ -199,6 +202,7 @@ exports.activate = function () {
 
     console.log(`[RepoSelect] Switching repo to "${newRepo}"`);
     nova.workspace.config.set("github.repo", newRepo);
+    invalidateConfigCache();
 
     // Clear selection
     Object.keys(selectedItems).forEach((k) => (selectedItems[k] = null));
@@ -259,7 +263,7 @@ exports.activate = function () {
   nova.workspace.config.observe("github.repos", updateRepoViews);
   // Move the token from the settings field into the Keychain
   nova.config.observe("github.token", (newValue) => {
-    const owner = nova.workspace.config.get("github.owner") || "default";
+    const owner = readSetting("github.owner") || "default";
     if (newValue === "") {
       // cancel any pending save, then remove immediately
       if (tokenSaveTimer) {

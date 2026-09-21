@@ -11,6 +11,7 @@ const {
   loadConfig,
   isConfigReady,
   updateContextAvailability,
+  invalidateConfigCache,
 } = require("../config.js");
 const { hexToRgb, IssueItem } = require("./item.js");
 
@@ -28,6 +29,8 @@ class GitHubIssuesProvider {
     // coalesced: only the last event within 500ms triggers a refresh.
     let pendingRefresh = null;
     const refreshWhenReady = () => {
+      // No invalidation here — this fires per keystroke during settings
+      // edits; the TTL cache bounds config reads and expires naturally.
       updateContextAvailability();
       if (!isConfigReady()) return;
       if (pendingRefresh) clearTimeout(pendingRefresh);
