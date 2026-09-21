@@ -50,7 +50,8 @@
       "required": true,
       "placeholder": "30",
       "default": 30,
-      "minimum": 1
+      "min": 1,
+      "max": 120
     },
     {
       "key": "github.maxRecentItems",
