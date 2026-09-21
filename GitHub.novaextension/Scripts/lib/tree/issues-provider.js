@@ -277,71 +277,27 @@ class GitHubIssuesProvider {
         }
 
         // 6d) Comments & review‐comments
-        const comments =
-          i.comments > 0
-            ? await fetchCommentsForIssue(i.number, i.comments, {
-                token,
-                owner,
-                repo,
-              })
-            : [];
-
-        const reviewComments =
-          this.type === "pull" && i.review_comments > 0
-            ? await fetchReviewComments(i.number, i.review_comments, {
-                token,
-                owner,
-                repo,
-              })
-            : [];
-        const allComments = [...comments, ...reviewComments];
-
-        if (allComments.length > 0) {
+        // 6d) Comments are loaded lazily: the group node carries the
+        // request info, actual fetching happens in getChildren() when
+        // the user expands the group. This keeps enabling the extension
+        // at a handful of requests instead of one per issue.
+        const commentCount =
+          (i.comments || 0) +
+          (this.type === "pull" ? i.review_comments || 0 : 0);
+        if (commentCount > 0) {
           const group = new IssueItem({
             title: "Comments",
-            body: `(${allComments.length})`,
+            body: `(${commentCount})`,
             image: "comments",
           });
           group.parent = parent;
-
-          for (const c of allComments) {
-            const commentDate = new Date(c.created_at).toLocaleString();
-
-            const lines = c.body.split(/\r?\n/);
-            const firstLine = lines.find((l) => l.trim() !== "") || "";
-
-            // build a tooltip of up to 20 lines
-            const allLines = c.body.split(/\r?\n/);
-            const snippet = allLines.slice(0, 20);
-            if (allLines.length > 20) snippet.push("…");
-
-            // Trim leading/trailing empty lines
-            while (snippet.length && snippet[0].trim() === "") snippet.shift();
-            while (snippet.length && snippet[snippet.length - 1].trim() === "")
-              snippet.pop();
-
-            const tooltipBody = snippet.join("\n");
-            const author = c.user?.login || "unknown";
-            const tooltip = `${author} on ${commentDate}:\n\n${tooltipBody}`;
-
-            const date = new Date(c.created_at);
-            const shortDate = date.toLocaleDateString(undefined, {
-              month: "short",
-              day: "numeric",
-            }); // “Apr 2”
-            const title = `${author} on ${shortDate}`;
-
-            const item = new IssueItem({
-              title,
-              body: firstLine,
-              tooltip,
-              image: "comment",
-              url: c.html_url,
-            });
-            item.contextValue = "comment";
-            item.parent = group;
-            group.children.push(item);
-          }
+          group.commentSource = {
+            kind: this.type, // 'issue' | 'pull'
+            number: i.number,
+            issueComments: i.comments || 0,
+            reviewComments: this.type === "pull" ? i.review_comments || 0 : 0,
+            cfg: { token, owner, repo },
+          };
 
           parent.children.push(group);
         }
@@ -353,10 +309,51 @@ class GitHubIssuesProvider {
     return true;
   }
 
+  /**
+   * Fetch and attach comments for a Comments group on first expand.
+   * Repeated calls while a load is in flight share the same promise.
+   */
+  loadComments(group) {
+    if (group.commentsLoaded) return group.children;
+    if (group.commentsPending) return group.commentsPending;
+
+    const src = group.commentSource;
+    const issueFetch =
+      src.issueComments > 0
+        ? fetchCommentsForIssue(src.number, src.issueComments, src.cfg)
+        : Promise.resolve([]);
+    const reviewFetch =
+      src.reviewComments > 0
+        ? fetchReviewComments(src.number, src.reviewComments, src.cfg)
+        : Promise.resolve([]);
+
+    group.commentsPending = Promise.all([issueFetch, reviewFetch])
+      .then(([comments, reviewComments]) => {
+        const all = [...comments, ...reviewComments];
+        group.children = all.map((c) => {
+          const item = buildCommentItem(c);
+          item.parent = group;
+          return item;
+        });
+        group.commentsLoaded = true;
+        group.commentsPending = null;
+        return group.children;
+      })
+      .catch((err) => {
+        console.warn(`[Comments] Failed to load for #${src.number}:`, err);
+        group.commentsPending = null; // allow retry on next expand
+        return [];
+      });
+
+    return group.commentsPending;
+  }
+
   // ─── TreeDataProvider methods ────────────────────────────
 
   getChildren(element) {
-    return element ? element.children : this.rootItems;
+    if (!element) return this.rootItems;
+    if (element.commentSource) return this.loadComments(element);
+    return element.children;
   }
 
   getParent(element) {
@@ -419,6 +416,47 @@ class GitHubIssuesProvider {
   resolveElement(treeItem) {
     return (treeItem && this.itemMap.get(treeItem)) || treeItem || null;
   }
+}
+
+/**
+ * Build a comment tree node from a GitHub comment/review-comment object.
+ */
+function buildCommentItem(c) {
+  const commentDate = new Date(c.created_at).toLocaleString();
+
+  const lines = c.body.split(/\r?\n/);
+  const firstLine = lines.find((l) => l.trim() !== "") || "";
+
+  // build a tooltip of up to 20 lines
+  const allLines = c.body.split(/\r?\n/);
+  const snippet = allLines.slice(0, 20);
+  if (allLines.length > 20) snippet.push("…");
+
+  // Trim leading/trailing empty lines
+  while (snippet.length && snippet[0].trim() === "") snippet.shift();
+  while (snippet.length && snippet[snippet.length - 1].trim() === "")
+    snippet.pop();
+
+  const tooltipBody = snippet.join("\n");
+  const author = c.user?.login || "unknown";
+  const tooltip = `${author} on ${commentDate}:\n\n${tooltipBody}`;
+
+  const date = new Date(c.created_at);
+  const shortDate = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  }); // “Apr 2”
+  const title = `${author} on ${shortDate}`;
+
+  const item = new IssueItem({
+    title,
+    body: firstLine,
+    tooltip,
+    image: "comment",
+    url: c.html_url,
+  });
+  item.contextValue = "comment";
+  return item;
 }
 
 module.exports = { GitHubIssuesProvider };
