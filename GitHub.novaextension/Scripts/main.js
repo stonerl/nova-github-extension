@@ -25,6 +25,7 @@ const { dataStore, resetRateLimitFlag } = require("./lib/github.js");
 const { GitHubIssuesProvider } = require("./lib/tree/issues-provider.js");
 const { GitHubRepoProvider } = require("./lib/tree/repo-provider.js");
 const { parseGitConfig, decideDetection } = require("./lib/detect.js");
+const notify = require("./lib/notify.js");
 
 let refreshTimer = null;
 let configSetupTimer = null;
@@ -265,34 +266,8 @@ exports.activate = function () {
     dataStore.etags = {};
     dataStore.pullDetails = {};
 
-    // Delay to let workspace config observers update
-    setTimeout(() => {
-      if (!isConfigReady()) {
-        console.warn("[RepoSelect] Skipped fetch – config incomplete");
-        return;
-      }
-
-      const { token, owner, repo } = loadConfig(); // repo is now up to date
-      Promise.all([
-        dataStore.fetchState("issue", "open", token, owner, repo),
-        dataStore.fetchState("issue", "closed", token, owner, repo),
-        dataStore.fetchState("pull", "open", token, owner, repo),
-        dataStore.fetchState("pull", "closed", token, owner, repo),
-      ]).then(([openIssues, closedIssues, openPRs, closedPRs]) => {
-        openProvider
-          .refreshWithData(openIssues)
-          .then((c) => c && openView.reload());
-        closedProvider
-          .refreshWithData(closedIssues)
-          .then((c) => c && closedView.reload());
-        openPRProvider
-          .refreshWithData(openPRs)
-          .then((c) => c && openPRView.reload());
-        closedPRProvider
-          .refreshWithData(closedPRs)
-          .then((c) => c && closedPRView.reload());
-      });
-    }, 50);
+    // Provider refreshes ride the workspace github.repo observers
+    // (coalesced) — no second fetch cycle needed here.
     reposProvider.updateRepoList();
     reposView.reload();
   });
@@ -496,6 +471,7 @@ exports.activate = function () {
   nova.commands.register("github-issues.refresh", async () => {
     if (!isConfigReady()) {
       console.warn("[Command: Refresh] Skipped – config incomplete");
+      notify.configIncomplete();
       return;
     }
     const { token, owner, repo } = loadConfig();
@@ -517,6 +493,7 @@ exports.activate = function () {
     const { owner, repo } = loadConfig();
     if (!owner || !repo) {
       console.warn("[NewIssue] Missing owner/repo in config");
+      notify.configIncomplete();
       return;
     }
     const url = `https://github.com/${owner}/${repo}/issues/new`;
@@ -528,6 +505,7 @@ exports.activate = function () {
     const { owner, repo } = loadConfig();
     if (!owner || !repo) {
       console.warn("[NewPullRequest] Missing owner/repo in config");
+      notify.configIncomplete();
       return;
     }
     const url = `https://github.com/${owner}/${repo}/compare`;

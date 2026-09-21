@@ -9,6 +9,7 @@ const {
   saveCommentCache,
   loadCommentCache,
 } = require("./cache.js");
+const notify = require("./notify.js");
 
 let isRateLimited = false;
 const rateLimitLogged = new Set();
@@ -30,6 +31,7 @@ function applyRateLimit(resetAt, retryAfterSeconds, label) {
         ? `resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`
         : "pausing for at least 60s";
     console.warn(`[GitHub] ${label} rate-limited; ${resetDesc}`);
+    notify.rateLimitError();
   }
 
   let ms;
@@ -132,7 +134,17 @@ const dataStore = {
           break;
         }
 
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          const error = new Error(`HTTP ${resp.status}`);
+          if (resp.status === 401) {
+            notify.authError();
+            error.handled = true;
+          } else if (resp.status === 403) {
+            notify.forbiddenError();
+            error.handled = true;
+          }
+          throw error;
+        }
         const data = await resp.json();
         allItems = allItems.concat(data);
         if (data.length < itemsPerPage || allItems.length >= maxRecentItems) {
@@ -162,6 +174,7 @@ const dataStore = {
       return allItems;
     } catch (err) {
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
+      if (!err || !err.handled) notify.networkError();
       const disk = loadCache(type, state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
@@ -203,7 +216,17 @@ async function fetchCommentsForIssue(
       return cache?.data || [];
     }
     if (resp.status === 304) return cache?.data || [];
-    if (!resp.ok) throw new Error(`Comments fetch HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const error = new Error(`Comments fetch HTTP ${resp.status}`);
+      if (resp.status === 401) {
+        notify.authError();
+        error.handled = true;
+      } else if (resp.status === 403) {
+        notify.forbiddenError();
+        error.handled = true;
+      }
+      throw error;
+    }
 
     const data = await resp.json();
     const etag = resp.headers.get("etag");
@@ -211,6 +234,7 @@ async function fetchCommentsForIssue(
     return data;
   } catch (err) {
     console.warn(`[Comments] Fetch failed for issue #${issueNumber}:`, err);
+    if (!err || !err.handled) notify.networkError();
     return cache?.data || [];
   }
 }
@@ -245,7 +269,17 @@ async function fetchReviewComments(
       return cache?.data || [];
     }
     if (resp.status === 304) return cache?.data || [];
-    if (!resp.ok) throw new Error(`Review comments fetch HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const error = new Error(`Review comments fetch HTTP ${resp.status}`);
+      if (resp.status === 401) {
+        notify.authError();
+        error.handled = true;
+      } else if (resp.status === 403) {
+        notify.forbiddenError();
+        error.handled = true;
+      }
+      throw error;
+    }
 
     const data = await resp.json();
     const etag = resp.headers.get("etag");
@@ -253,6 +287,7 @@ async function fetchReviewComments(
     return data;
   } catch (err) {
     console.warn(`[ReviewComments] fetch failed for PR #${pullNumber}:`, err);
+    if (!err || !err.handled) notify.networkError();
     return cache?.data || [];
   }
 }
