@@ -42,7 +42,7 @@ class GitHubIssuesProvider {
     for (const key of ["github.token", "github.owner"]) {
       nova.config.observe(key, refreshWhenReady);
     }
-    for (const key of ["github.owner", "github.repo"]) {
+    for (const key of ["github.owner", "github.repo", "github.detected"]) {
       nova.workspace.config.observe(key, refreshWhenReady);
     }
   }

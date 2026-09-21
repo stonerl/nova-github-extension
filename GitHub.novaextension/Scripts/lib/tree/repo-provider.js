@@ -1,7 +1,11 @@
 // lib/tree/repo-provider.js
 // TreeDataProvider for the "Repositories" sidebar section.
 
-const { invalidateConfigCache, readSetting } = require("../config.js");
+const {
+  invalidateConfigCache,
+  getConfiguredRepos,
+  resolveActiveRepo,
+} = require("../config.js");
 
 class GitHubRepoProvider {
   constructor() {
@@ -10,11 +14,11 @@ class GitHubRepoProvider {
   }
 
   updateRepoList() {
-    // 1) load all repos from config (workspace override wins)
-    const repos = readSetting("github.repos") || [];
+    // 1) load all repos — explicit workspace override > detected > global
+    const repos = getConfiguredRepos() || [];
 
-    // 2) figure out the “current” repo
-    let currentRepo = nova.workspace.config.get("github.repo");
+    // 2) figure out the “current” repo (same precedence)
+    let currentRepo = resolveActiveRepo();
 
     // 3) if none is set or it’s not in the list, pick the first one.
     //    With no repos configured at all, the stale persisted value

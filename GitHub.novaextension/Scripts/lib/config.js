@@ -43,6 +43,45 @@ function readSetting(key) {
   return readScoped(nova.config, key);
 }
 
+// Repo auto-detection writes a single hidden workspace key
+// ("owner/repo") instead of three separate settings — multiple
+// workspace-config writes in quick succession can amplify into a
+// config write storm that freezes Nova. Explicit settings (manual
+// workspace overrides) still win over the detected value.
+function detectedOverride() {
+  const raw = nova.workspace.config.get("github.detected");
+  if (!raw || typeof raw !== "string") return null;
+  const slash = raw.indexOf("/");
+  if (slash < 1 || slash === raw.length - 1) return null;
+  const owner = raw.slice(0, slash);
+  const repo = raw.slice(slash + 1);
+  return { owner, repo, repos: [repo] };
+}
+
+function resolveOwner() {
+  const ws = nova.workspace.config.get("github.owner");
+  if (ws !== null && ws !== undefined) return ws;
+  const detected = detectedOverride();
+  if (detected) return detected.owner;
+  return nova.config.get("github.owner");
+}
+
+function getConfiguredRepos() {
+  const ws = nova.workspace.config.get("github.repos");
+  if (ws !== null && ws !== undefined) return ws;
+  const detected = detectedOverride();
+  if (detected) return detected.repos;
+  return nova.config.get("github.repos");
+}
+
+function resolveActiveRepo() {
+  const ws = nova.workspace.config.get("github.repo");
+  if (ws !== null && ws !== undefined) return ws;
+  const detected = detectedOverride();
+  if (detected) return detected.repo;
+  return null;
+}
+
 // Enum settings come back as strings ("50"); numeric coercion keeps
 // comparisons like maxRecentItems <= itemsPerPage working so ETag
 // revalidation stays enabled.
@@ -59,8 +98,9 @@ function loadConfig() {
 
   let result;
 
-  // 1) Owner is mandatory. Workspace override wins, global fallback.
-  const owner = readScoped(nova.config, "github.owner");
+  // 1) Owner is mandatory. Precedence: explicit workspace override >
+  //    detected workspace account > global setting.
+  const owner = resolveOwner();
   if (!owner) {
     logThrottled("no-owner", () =>
       console.error("[Config] github.owner must be set"),
@@ -94,7 +134,7 @@ function loadConfig() {
     result = {
       token,
       owner,
-      repo: nova.workspace.config.get("github.repo"),
+      repo: resolveActiveRepo(),
       refreshInterval: toNumber(nova.config.get("github.refreshInterval"), 30),
       maxRecentItems: toNumber(nova.config.get("github.maxRecentItems"), 50),
       itemsPerPage: toNumber(nova.config.get("github.itemsPerPage"), 100),
@@ -144,4 +184,8 @@ module.exports = {
   setLastRefresh,
   invalidateConfigCache,
   readSetting,
+  resolveOwner,
+  getConfiguredRepos,
+  resolveActiveRepo,
+  detectedOverride,
 };

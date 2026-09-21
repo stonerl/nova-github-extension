@@ -78,7 +78,11 @@ function decideDetection(detected, current) {
 
   if (sameOwner && inList) {
     if (current.activeRepo === detected.repo) return { type: "none" };
-    return { type: "setActiveRepo", repo: detected.repo };
+    return {
+      type: "setActiveRepo",
+      owner: detected.owner,
+      repo: detected.repo,
+    };
   }
 
   if (sameOwner && current.activeRepo === detected.repo) {

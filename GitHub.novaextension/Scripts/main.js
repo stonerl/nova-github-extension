@@ -9,6 +9,9 @@ const {
   setLastRefresh,
   invalidateConfigCache,
   readSetting,
+  resolveOwner,
+  getConfiguredRepos,
+  resolveActiveRepo,
   CREDENTIALS_SERVICE,
 } = require("./lib/config.js");
 const { cacheDir, ensureDirExists, loadCache } = require("./lib/cache.js");
@@ -269,13 +272,21 @@ exports.activate = function () {
   };
   nova.config.observe("github.repos", updateRepoViews);
   nova.workspace.config.observe("github.repos", updateRepoViews);
+  nova.workspace.config.observe("github.detected", updateRepoViews);
 
   // 7) Auto-detect the workspace's GitHub repo from .git/config.
   //    Same account + repo already in the list: switch to it silently.
   //    Different account or unknown repo: ask before applying.
+  //    Applying writes exactly ONE workspace key ("github.detected") —
+  //    multiple workspace-config writes in quick succession amplify
+  //    into a write storm that can freeze Nova.
+  let detectionAppliedPath = null;
+
   async function applyDetectedRepo() {
     const workspacePath = nova.workspace.path;
     if (!workspacePath) return;
+    if (detectionAppliedPath === workspacePath) return; // re-entry guard
+    detectionAppliedPath = workspacePath;
 
     let detected = null;
     try {
@@ -289,12 +300,15 @@ exports.activate = function () {
 
     const decision = decideDetection(detected, {
       owner: loadConfig().owner,
-      repos: readSetting("github.repos") || [],
-      activeRepo: nova.workspace.config.get("github.repo"),
+      repos: getConfiguredRepos() || [],
+      activeRepo: resolveActiveRepo(),
     });
 
     if (decision.type === "setActiveRepo") {
-      nova.workspace.config.set("github.repo", decision.repo);
+      nova.workspace.config.set(
+        "github.detected",
+        `${decision.owner}/${decision.repo}`,
+      );
       invalidateConfigCache();
       console.log(`[RepoSelect] Detected workspace repo: ${decision.repo}`);
       updateRepoViews();
@@ -317,17 +331,15 @@ exports.activate = function () {
     }
   }
 
-  // Applies the workspace-scoped writes for a detected repo. Each config
-  // write dispatches change notifications inside Nova's process; spacing
-  // them out keeps our subsequent reads from nesting in that dispatch.
+  // Applies the confirmed detection. Exactly one config write, then a
+  // pause before any reads so Nova's notification dispatch can drain.
   async function applyDetectedAccount(decision) {
     const label = `${decision.owner}/${decision.repo}`;
     try {
-      nova.workspace.config.set("github.owner", decision.owner);
-      await wait(100);
-      nova.workspace.config.set("github.repos", [decision.repo]);
-      await wait(100);
-      nova.workspace.config.set("github.repo", decision.repo);
+      nova.workspace.config.set(
+        "github.detected",
+        `${decision.owner}/${decision.repo}`,
+      );
       await wait(100);
       invalidateConfigCache();
       console.log(
@@ -339,11 +351,14 @@ exports.activate = function () {
     }
   }
   applyDetectedRepo();
-  nova.workspace.onDidChangePath(applyDetectedRepo);
+  nova.workspace.onDidChangePath(() => {
+    detectionAppliedPath = null;
+    applyDetectedRepo();
+  });
 
   // Move the token from the settings field into the Keychain
   nova.config.observe("github.token", (newValue) => {
-    const owner = readSetting("github.owner") || "default";
+    const owner = resolveOwner() || "default";
     if (newValue === "") {
       // cancel any pending save, then remove immediately
       if (tokenSaveTimer) {
