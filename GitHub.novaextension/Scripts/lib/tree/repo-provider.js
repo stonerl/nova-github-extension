@@ -6,7 +6,25 @@ const {
   getConfiguredRepos,
   resolveActiveRepo,
   setWorkspaceConfig,
+  readSetting,
+  detectedOverride,
 } = require("../config.js");
+
+// A row is detection-sourced when it comes from the detection layer
+// and is not also explicitly configured — those are the only rows a
+// user can "forget" (explicit rows are managed in settings).
+function repoSourceValue(name) {
+  const explicit = readSetting("github.repos");
+  const detected = detectedOverride();
+  if (
+    detected &&
+    name === detected.repo &&
+    !(Array.isArray(explicit) && explicit.includes(name))
+  ) {
+    return "detected-repo-item";
+  }
+  return "repo-item";
+}
 
 class GitHubRepoProvider {
   constructor() {
@@ -44,7 +62,7 @@ class GitHubRepoProvider {
     if (currentRepo) {
       const current = new TreeItem(currentRepo, TreeItemCollapsibleState.None);
       current.identifier = currentRepo;
-      current.contextValue = "repo-item";
+      current.contextValue = repoSourceValue(currentRepo);
       current.image = "sidebar-small";
       items.push(current);
 
@@ -60,7 +78,7 @@ class GitHubRepoProvider {
     for (const name of remaining) {
       const item = new TreeItem(name, TreeItemCollapsibleState.None);
       item.identifier = name;
-      item.contextValue = "repo-item";
+      item.contextValue = repoSourceValue(name);
       item.image = "code_branch";
       items.push(item);
     }

@@ -97,6 +97,31 @@ function detectedOverride() {
   return detectedWorkspace;
 }
 
+// Removes this workspace's entry from the detection file and clears
+// the in-memory state; the sidebar falls back to explicit settings.
+function forgetDetectionForWorkspace() {
+  const path = nova.workspace.path;
+  if (!path) return;
+  let map = {};
+  try {
+    const file = nova.fs.open(detectionsPath, "r");
+    const text = file.read();
+    file.close();
+    map = JSON.parse(text);
+  } catch {
+    map = {};
+  }
+  delete map[path];
+  try {
+    const file = nova.fs.open(detectionsPath, "w+t");
+    file.write(JSON.stringify(map, null, 2));
+    file.close();
+  } catch (e) {
+    console.warn("[Detect] Failed to update detection file:", e);
+  }
+  detectedWorkspace = null;
+}
+
 function resolveOwner() {
   const ws = nova.workspace.config.get("github.owner");
   if (ws !== null && ws !== undefined) return ws;
@@ -260,8 +285,10 @@ module.exports = {
   resolveOwner,
   getConfiguredRepos,
   resolveActiveRepo,
+  detectedOverride,
   loadDetections,
   saveDetectionForWorkspace,
+  forgetDetectionForWorkspace,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,

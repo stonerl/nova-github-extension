@@ -199,6 +199,13 @@
               "tooltip": "Open Current Repository on GitHub",
               "command": "github-issues.openInBrowser"
             }
+          ],
+          "contextCommands": [
+            {
+              "title": "Forget Detection",
+              "command": "github-issues.forgetDetection",
+              "when": "viewItem == 'detected-repo-item'"
+            }
           ]
         }
       ]
@@ -274,6 +281,13 @@
               "image": "sidebar-small",
               "tooltip": "Open Current Repository on GitHub",
               "command": "github-issues.openInBrowser"
+            }
+          ],
+          "contextCommands": [
+            {
+              "title": "Forget Detection",
+              "command": "github-issues.forgetDetection",
+              "when": "viewItem == 'detected-repo-item'"
             }
           ]
         }

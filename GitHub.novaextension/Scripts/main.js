@@ -14,6 +14,7 @@ const {
   resolveActiveRepo,
   loadDetections,
   saveDetectionForWorkspace,
+  forgetDetectionForWorkspace,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,
@@ -217,7 +218,7 @@ exports.activate = function () {
       return;
     }
 
-    const repos = readSetting("github.repos") || [];
+    const repos = getConfiguredRepos() || [];
     let newRepo = items[0]?.identifier;
 
     // if they didn’t actually pick one (or it’s no longer in the list),
@@ -604,6 +605,23 @@ exports.activate = function () {
 
   nova.commands.register("github-issues.reopenIssue", async () => {
     await updateIssueState("open");
+  });
+
+  // Removes this workspace's detected repo (one-click; the detection
+  // notification simply reappears next open if still wanted).
+  nova.commands.register("github-issues.forgetDetection", () => {
+    forgetDetectionForWorkspace();
+    invalidateConfigCache();
+    console.log("[RepoSelect] Detection forgotten for this workspace");
+    updateRepoViews();
+    for (const provider of [
+      openProvider,
+      closedProvider,
+      openPRProvider,
+      closedPRProvider,
+    ]) {
+      provider.configChanged();
+    }
   });
 
   // 5) When switching back to either view, re-fetch
