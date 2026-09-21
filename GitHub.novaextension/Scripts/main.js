@@ -15,6 +15,7 @@ const { cacheDir, ensureDirExists, loadCache } = require("./lib/cache.js");
 const { dataStore, resetRateLimitFlag } = require("./lib/github.js");
 const { GitHubIssuesProvider } = require("./lib/tree/issues-provider.js");
 const { GitHubRepoProvider } = require("./lib/tree/repo-provider.js");
+const { parseGitConfig, decideDetection } = require("./lib/detect.js");
 
 let refreshTimer = null;
 
@@ -262,6 +263,57 @@ exports.activate = function () {
   };
   nova.config.observe("github.repos", updateRepoViews);
   nova.workspace.config.observe("github.repos", updateRepoViews);
+
+  // 7) Auto-detect the workspace's GitHub repo from .git/config.
+  //    Same account + repo already in the list: switch to it silently.
+  //    Different account or unknown repo: ask before applying.
+  async function applyDetectedRepo() {
+    const workspacePath = nova.workspace.path;
+    if (!workspacePath) return;
+
+    let detected = null;
+    try {
+      const file = nova.fs.open(`${workspacePath}/.git/config`, "r");
+      const text = file.read();
+      file.close();
+      detected = parseGitConfig(text);
+    } catch {
+      return; // no .git/config here — manual config applies
+    }
+
+    const decision = decideDetection(detected, {
+      owner: loadConfig().owner,
+      repos: readSetting("github.repos") || [],
+      activeRepo: nova.workspace.config.get("github.repo"),
+    });
+
+    if (decision.type === "setActiveRepo") {
+      nova.workspace.config.set("github.repo", decision.repo);
+      invalidateConfigCache();
+      console.log(`[RepoSelect] Detected workspace repo: ${decision.repo}`);
+      updateRepoViews();
+    } else if (decision.type === "confirmNewAccount") {
+      const label = `${decision.owner}/${decision.repo}`;
+      nova.workspace.showChoicePalette(
+        [`Use ${label} in this workspace`, "No thanks"],
+        { placeholder: `Found GitHub repository ${label}` },
+        (choice) => {
+          if (!choice || !choice.startsWith("Use ")) return;
+          nova.workspace.config.set("github.owner", decision.owner);
+          nova.workspace.config.set("github.repos", [decision.repo]);
+          nova.workspace.config.set("github.repo", decision.repo);
+          invalidateConfigCache();
+          console.log(
+            `[RepoSelect] Using detected repo ${label} for this workspace`,
+          );
+          updateRepoViews();
+        },
+      );
+    }
+  }
+  applyDetectedRepo();
+  nova.workspace.onDidChangePath(applyDetectedRepo);
+
   // Move the token from the settings field into the Keychain
   nova.config.observe("github.token", (newValue) => {
     const owner = readSetting("github.owner") || "default";
