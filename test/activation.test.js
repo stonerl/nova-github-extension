@@ -77,10 +77,14 @@ test("deferred setup registers observers, commands, and fetches", async () => {
     assert.ok(commands.includes(cmd), `command registered: ${cmd}`);
   }
 
-  // one request per state (open + closed), despite 4 providers
+  // one request per state (open + closed), despite 4 providers —
+  // the one-time /user account-backfill probe doesn't count here
+  const listRequests = stub.captures.fetchCalls
+    .slice(before)
+    .filter((f) => !f.url.includes("api.github.com/user"));
   assert.ok(
-    stub.captures.fetchCalls.length - before <= 2,
-    `deferred setup fetches ≤2 lists (got ${stub.captures.fetchCalls.length - before})`,
+    listRequests.length <= 2,
+    `deferred setup fetches ≤2 lists (got ${listRequests.length})`,
   );
   onFetch();
 });
@@ -308,4 +312,120 @@ test("budget-low refresh does not mark the repo fresh", async () => {
     "budget-skipped cycle must not count as fresh",
   );
   main.deactivate();
+});
+
+const TEST_TOKEN = "ghp_0123456789abcdefghijklmnopqrstuv";
+
+test("token save probes /user and stores under the account login", async () => {
+  const stub = setup({
+    workspaceValues: { "github.owner": "org-a", "github.repo": "repo-a" },
+  });
+  stub.fetchImpl = async (url) => {
+    if (url === "https://api.github.com/user") {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null, has: () => false },
+        json: async () => ({ login: "acct-x" }),
+      };
+    }
+    throw new Error("unexpected fetch: " + url);
+  };
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+
+  stub.fireObserver("global", "github.token", TEST_TOKEN);
+  await new Promise((r) => setTimeout(r, 450));
+
+  assert.equal(
+    stub.credentialsMap["acct-x"],
+    TEST_TOKEN,
+    "keychain entry keyed by the authenticated login",
+  );
+  assert.equal(
+    stub.credentialsMap["org-a"],
+    undefined,
+    "no per-owner entry when the probe succeeds",
+  );
+  assert.equal(stub.globalValues["github.token"], "***", "masked");
+
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.equal(cfg.loginForOwner("org-a"), "acct-x", "mapping recorded");
+  cfg.invalidateConfigCache();
+  assert.equal(
+    cfg.loadConfig().token,
+    TEST_TOKEN,
+    "loadConfig resolves the token via the login mapping",
+  );
+  main.deactivate();
+});
+
+test("token save falls back to per-owner key when /user is unreachable", async () => {
+  const stub = setup({
+    workspaceValues: { "github.owner": "org-a", "github.repo": "repo-a" },
+  });
+  stub.fetchImpl = async () => {
+    throw new Error("offline");
+  };
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+  stub.fireObserver("global", "github.token", TEST_TOKEN);
+  await new Promise((r) => setTimeout(r, 450));
+
+  assert.equal(
+    stub.credentialsMap["org-a"],
+    TEST_TOKEN,
+    "legacy owner-keyed write preserved the credential",
+  );
+  assert.equal(stub.globalValues["github.token"], "***", "masked");
+  main.deactivate();
+});
+
+test("backfill maps legacy per-owner tokens once, then never again", async () => {
+  const stub = setup({ credentials: { stonerl: "tok-legacy" } });
+  let userProbes = 0;
+  stub.fetchImpl = async (url) => {
+    if (url === "https://api.github.com/user") {
+      userProbes++;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null, has: () => false },
+        json: async () => ({ login: "stonerl" }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+        has: () => false,
+      },
+      json: async () => [],
+    };
+  };
+
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 250));
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.equal(cfg.loginForOwner("stonerl"), "stonerl", "mapping learned");
+  assert.equal(userProbes, 1, "exactly one probe");
+  main.deactivate();
+
+  // second session: mapping is persisted → zero probes
+  const main2 = freshRequire("main.js");
+  main2.activate();
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(userProbes, 1, "no probe after the mapping exists");
+  main2.deactivate();
 });

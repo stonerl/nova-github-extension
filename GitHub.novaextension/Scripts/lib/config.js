@@ -97,6 +97,87 @@ function detectedOverride() {
   return detectedWorkspace;
 }
 
+// Tokens are keyed in the Keychain by the AUTHENTICATED login (one
+// entry per GitHub account), not by repo owner — a personal login and
+// the orgs it can access share one credential, so a rotation updates
+// all of them at once. Which owner belongs to which account is learned
+// at runtime and persisted in the extension's own storage file (same
+// discipline as detections: no config writes, no bursts).
+const accountsPath = `${nova.extension.globalStoragePath}/accounts.json`;
+let orgToLogin = null; // lazy: { "<repo-owner>": "<login>" }
+
+function loadOrgToLogin() {
+  if (orgToLogin) return orgToLogin;
+  try {
+    const file = nova.fs.open(accountsPath, "r");
+    const text = file.read();
+    file.close();
+    const parsed = JSON.parse(text);
+    orgToLogin =
+      parsed && typeof parsed.orgToLogin === "object" && parsed.orgToLogin
+        ? parsed.orgToLogin
+        : {};
+  } catch {
+    orgToLogin = {}; // no file yet, or unreadable
+  }
+  return orgToLogin;
+}
+
+function persistOrgToLogin() {
+  try {
+    const file = nova.fs.open(accountsPath, "w+t");
+    file.write(JSON.stringify({ orgToLogin: orgToLogin || {} }, null, 2));
+    file.close();
+  } catch (e) {
+    console.warn("[Config] Failed to persist account mapping:", e);
+  }
+}
+
+// Called after a token is confirmed to belong to `login` (via the
+// /user probe) while working with repo owner `owner`.
+function recordOwnerLogin(owner, login) {
+  if (!owner || !login) return;
+  const map = loadOrgToLogin();
+  if (map[owner] === login) return;
+  map[owner] = login;
+  persistOrgToLogin();
+}
+
+function loginForOwner(owner) {
+  if (!owner) return null;
+  return loadOrgToLogin()[owner] || null;
+}
+
+function forgetOwnerLogin(owner) {
+  if (!owner) return;
+  const map = loadOrgToLogin();
+  if (!map[owner]) return;
+  delete map[owner];
+  persistOrgToLogin();
+}
+
+// Known repo owners across this installation: the global setting plus
+// every owner recorded in the detections file. Used by the one-time
+// /user backfill that maps legacy per-owner tokens to logins.
+function knownOwners() {
+  const owners = new Set();
+  const globalOwner = nova.config.get("github.owner");
+  if (globalOwner) owners.add(globalOwner);
+  try {
+    const file = nova.fs.open(detectionsPath, "r");
+    const text = file.read();
+    file.close();
+    const map = JSON.parse(text);
+    for (const value of Object.values(map || {})) {
+      const detected = parseDetectedEntry(value);
+      if (detected) owners.add(detected.owner);
+    }
+  } catch {
+    // no detections file — global owner only
+  }
+  return [...owners];
+}
+
 // Removes this workspace's entry from the detection file and clears
 // the in-memory state; the sidebar falls back to explicit settings.
 function forgetDetectionForWorkspace() {
@@ -205,8 +286,20 @@ function loadConfig() {
     );
     result = { token: null, owner: null, repo: null /*…*/ };
   } else {
-    // 2) First try to load under the real owner
-    let token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+    // 2) Token resolution, newest model first:
+    //    a) Keychain entry of the ACCOUNT that owns this repo (learned
+    //       via the /user probe) — personal login and orgs share one
+    //       token, so rotations propagate everywhere at once.
+    //    b) Legacy per-owner entry from earlier versions.
+    //    c) Legacy "default" entry, migrated over once.
+    const login = loginForOwner(owner);
+    let token = login
+      ? nova.credentials.getPassword(CREDENTIALS_SERVICE, login)
+      : null;
+
+    if (!token) {
+      token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+    }
 
     // 3) If this is the first time they've set an owner,
     //    migrate the old “default” token over
@@ -308,6 +401,10 @@ module.exports = {
   loadDetections,
   saveDetectionForWorkspace,
   forgetDetectionForWorkspace,
+  recordOwnerLogin,
+  loginForOwner,
+  forgetOwnerLogin,
+  knownOwners,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,

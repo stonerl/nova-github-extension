@@ -15,6 +15,10 @@ const {
   loadDetections,
   saveDetectionForWorkspace,
   forgetDetectionForWorkspace,
+  recordOwnerLogin,
+  loginForOwner,
+  forgetOwnerLogin,
+  knownOwners,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,
@@ -57,7 +61,26 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let tokenSaveTimer = null;
 let tokenSavePayload = null; // { owner, token }
 
-function flushTokenSave() {
+// One authenticated request identifies the ACCOUNT a token belongs to.
+// Tokens are stored under that login — a personal login and all orgs
+// it can access then share a single Keychain entry, so rotating the
+// PAT updates every repo at once while genuinely separate accounts
+// keep separate entries.
+async function probeTokenLogin(token) {
+  const resp = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github.v3+json",
+    },
+  });
+  if (!resp.ok) return { ok: false, status: resp.status };
+  const data = await resp.json();
+  return data && data.login
+    ? { ok: true, login: data.login }
+    : { ok: false, status: resp.status };
+}
+
+async function flushTokenSave() {
   if (tokenSaveTimer) {
     clearTimeout(tokenSaveTimer);
     tokenSaveTimer = null;
@@ -66,13 +89,64 @@ function flushTokenSave() {
   const { owner, token } = tokenSavePayload;
   tokenSavePayload = null;
   try {
-    nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, token);
+    let probe = null;
+    try {
+      probe = await probeTokenLogin(token);
+    } catch {
+      probe = null; // offline — fall through to the legacy write
+    }
+
+    if (probe && probe.ok) {
+      nova.credentials.setPassword(CREDENTIALS_SERVICE, probe.login, token);
+      recordOwnerLogin(owner, probe.login);
+      console.log(
+        `[Config] GitHub token stored for account ${probe.login} (owner ${owner})`,
+      );
+    } else {
+      if (probe) {
+        console.warn(
+          `[Config] /user probe rejected the token (HTTP ${probe.status}) — storing under owner "${owner}" as fallback`,
+        );
+      } else {
+        console.warn(
+          `[Config] /user probe unreachable — storing token under owner "${owner}" as fallback`,
+        );
+      }
+      nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, token);
+    }
     // mask the setting so it never stays in cleartext
     setGlobalConfig("github.token", "***");
     invalidateConfigCache(); // cached config may hold token: null
-    console.log("[Config] GitHub token moved to Keychain");
   } catch (err) {
     console.error("[Config] Failed to save token to Keychain:", err);
+  }
+}
+
+// One-time migration for tokens stored by earlier versions under the
+// repo owner instead of the account login: probe /user once per known
+// owner that has no mapping yet and record which account it belongs
+// to. Persisted, so the cost is paid once per owner ever.
+async function backfillAccountMappings() {
+  for (const owner of knownOwners()) {
+    if (loginForOwner(owner)) continue;
+    let token = null;
+    try {
+      token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+    } catch {
+      return; // keychain bridge trouble — don't hammer it with probes
+    }
+    if (!token) continue;
+    try {
+      const probe = await probeTokenLogin(token);
+      if (probe.ok) {
+        recordOwnerLogin(owner, probe.login);
+        console.log(
+          `[Config] Account backfill: owner ${owner} → ${probe.login}`,
+        );
+      }
+    } catch {
+      return; // offline — retry next session
+    }
   }
 }
 
@@ -110,6 +184,7 @@ exports.activate = function () {
     observeRepoListChanges();
     startDetection();
     observeTokenSetting();
+    backfillAccountMappings();
     initialLoad();
   }
   configSetupTimer = setTimeout(() => {
@@ -431,7 +506,18 @@ exports.activate = function () {
           tokenSaveTimer = null;
           tokenSavePayload = null;
         }
-        nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
+        // the credential is shared by every owner of the account, so
+        // the mapped login entry goes too
+        const login = loginForOwner(owner);
+        if (login) {
+          try {
+            nova.credentials.removePassword(CREDENTIALS_SERVICE, login);
+          } catch {}
+        }
+        try {
+          nova.credentials.removePassword(CREDENTIALS_SERVICE, owner);
+        } catch {}
+        forgetOwnerLogin(owner);
         console.log("[Config] GitHub token removed from Keychain");
       } else if (
         typeof newValue === "string" &&

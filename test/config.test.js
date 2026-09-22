@@ -54,6 +54,80 @@ test("token resolves per owner from the Keychain", () => {
   assert.equal(cfg.loadConfig().token, "tok-1");
 });
 
+test("account mapping: token resolves via the login, not the owner", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    credentials: { "acct-a": "tok-account" },
+    files: {
+      "/novatest/globalStorage/accounts.json": JSON.stringify({
+        orgToLogin: { stonerl: "acct-a" },
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.equal(cfg.loginForOwner("stonerl"), "acct-a");
+  assert.equal(
+    cfg.loadConfig().token,
+    "tok-account",
+    "mapped login entry wins",
+  );
+});
+
+test("account mapping: legacy per-owner entry is the fallback", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    credentials: { stonerl: "tok-legacy" },
+    files: {
+      "/novatest/globalStorage/accounts.json": JSON.stringify({
+        orgToLogin: { stonerl: "acct-gone" }, // entry no longer exists
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.equal(cfg.loadConfig().token, "tok-legacy");
+});
+
+test("recordOwnerLogin persists to accounts.json", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  cfg.recordOwnerLogin("stonerl", "acct-a");
+  cfg.recordOwnerLogin("work-org", "acct-a");
+  cfg.recordOwnerLogin("other", "acct-b");
+  const written = Object.entries(stub.files).find(([k]) =>
+    k.endsWith("accounts.json"),
+  );
+  assert.ok(written, "accounts.json written");
+  assert.deepEqual(JSON.parse(written[1]).orgToLogin, {
+    stonerl: "acct-a",
+    "work-org": "acct-a",
+    other: "acct-b",
+  });
+  cfg.forgetOwnerLogin("other");
+  assert.equal(cfg.loginForOwner("other"), null);
+  assert.equal(cfg.loginForOwner("stonerl"), "acct-a");
+});
+
+test("knownOwners collects global owner + detection owners", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    files: {
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/ws/one": "org-a/repo-one",
+        "/ws/two": "stonerl/repo-two",
+        "/ws/bad": "garbage",
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.knownOwners().sort(), ["org-a", "stonerl"]);
+});
+
 test("isConfigReady requires token, owner, and repo", () => {
   const stub = createNovaStub({
     globalValues: { "github.owner": "stonerl" },
