@@ -2,7 +2,7 @@
 // GitHub REST access: list fetching with ETag revalidation,
 // rate-limit tracking, and comment retrieval with disk caching.
 
-const { loadConfig } = require("./config.js");
+const { loadConfig, isConfiguredRepo } = require("./config.js");
 const {
   saveCache,
   loadCache,
@@ -244,7 +244,17 @@ const dataStore = {
             notify.forbiddenError();
             error.handled = true;
           } else if (resp.status === 404) {
-            notify.notFoundError();
+            if (isConfiguredRepo(owner, repo)) {
+              notify.notFoundError();
+            } else {
+              // Fetch raced the detection flow (stale workspace repo
+              // selection from another account, add-prompt pending) —
+              // alerting here would contradict the "add this repo?"
+              // prompt showing at the same moment.
+              console.warn(
+                `[GitHub] 404 for unconfigured repo ${owner}/${repo} — ignoring (detection pending or stale selection)`,
+              );
+            }
             error.handled = true;
           }
           throw error;

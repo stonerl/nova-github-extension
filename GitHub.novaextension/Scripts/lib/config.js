@@ -178,6 +178,18 @@ function knownOwners() {
   return [...owners];
 }
 
+// True when this owner/repo pair is what the workspace is actually
+// configured for right now. Used to keep 404 alerts meaningful: a
+// fetch for a stale or unconfirmed repo (detection prompt still
+// pending, or a leftover workspace github.repo from another account)
+// must not surface a scary "repository not found" alert.
+function isConfiguredRepo(owner, repo) {
+  if (!owner || !repo) return false;
+  if (resolveOwner() !== owner) return false;
+  const repos = getConfiguredRepos() || [];
+  return repos.includes(repo);
+}
+
 // Removes this workspace's entry from the detection file and clears
 // the in-memory state; the sidebar falls back to explicit settings.
 function forgetDetectionForWorkspace() {
@@ -405,6 +417,7 @@ module.exports = {
   loginForOwner,
   forgetOwnerLogin,
   knownOwners,
+  isConfiguredRepo,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,
