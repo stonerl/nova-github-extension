@@ -1,3 +1,15 @@
+## Version 0.9.1
+
+### Fixes
+
+- The Repositories section now shows in both sidebars: the section was
+  declared twice (Issues and PRs) under one id with a single view
+  instance, so Nova left one sidebar's section without a provider until
+  a restart happened to re-bind it. The PR sidebar's section now has its
+  own view driven by the same provider — both render identical data,
+  list changes reload both, and selecting a repository in either
+  sidebar sets the current repo for both.
+
 ## Version 0.9.0
 
 ### Features
