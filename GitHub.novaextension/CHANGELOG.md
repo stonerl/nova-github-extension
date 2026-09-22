@@ -1,3 +1,18 @@
+## Version 0.9.2
+
+### Fixes
+
+- Forget Detection now cleans up properly: the workspace selection no
+  longer keeps pointing at the forgotten repo (its issues and PRs kept
+  loading, and the stale value lingered in the config). It is dropped —
+  auto-selecting the first remaining repository, or cleared when none
+  remain — and the issue/PR views are purged immediately. Repos that are
+  also configured manually keep their selection and row.
+- The repo-list fallback no longer claims the selection before
+  auto-detection applies: a fresh workspace now persists the detected
+  repository in its canonical owner/repo form instead of a bare name
+  racing the detection flow.
+
 ## Version 0.9.1
 
 ### Fixes
