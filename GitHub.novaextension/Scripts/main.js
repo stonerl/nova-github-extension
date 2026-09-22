@@ -19,6 +19,7 @@ const {
   loginForOwner,
   forgetOwnerLogin,
   knownOwners,
+  isAutoDetectEnabled,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,
@@ -187,6 +188,17 @@ exports.activate = function () {
     observeMaxRecentItems();
     updateRepoViews(); // initial repos list (config reads — deferred)
     observeRepoListChanges();
+    // Feature toggle: turning detection on mid-session runs it right
+    // away; off is non-destructive — saved detections keep applying.
+    nova.config.observe(
+      "github.autoDetectRepos",
+      skipInitialCall((enabled) => {
+        if (!enabled) return;
+        invalidateConfigCache();
+        updateRepoViews();
+        applyDetectedRepo();
+      }),
+    );
     startDetection();
     observeTokenSetting();
     backfillAccountMappings();
@@ -435,6 +447,12 @@ exports.activate = function () {
   let detectionAppliedPath = null;
 
   async function applyDetectedRepo() {
+    // Feature toggle (github.autoDetectRepos, global, on by default):
+    // off means no scanning, no prompts, no new applications. Checked
+    // BEFORE the re-entry guard so flipping it on later still applies.
+    // Already-saved detections keep resolving — forgetDetection
+    // removes one explicitly.
+    if (!isAutoDetectEnabled()) return;
     const workspacePath = nova.workspace.path;
     if (!workspacePath) return;
     if (detectionAppliedPath === workspacePath) return; // re-entry guard

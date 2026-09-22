@@ -178,6 +178,13 @@ function knownOwners() {
   return [...owners];
 }
 
+// Global feature toggle: whether the extension reads .git/config and
+// offers detected repos. On by default; persisted detections keep
+// resolving while it is off (forgetDetection removes one).
+function isAutoDetectEnabled() {
+  return nova.config.get("github.autoDetectRepos") !== false;
+}
+
 // True when this owner/repo pair is what the workspace is actually
 // configured for right now. Used to keep 404 alerts meaningful: a
 // fetch for a stale or unconfirmed repo (detection prompt still
@@ -445,6 +452,7 @@ module.exports = {
   forgetOwnerLogin,
   knownOwners,
   isConfiguredRepo,
+  isAutoDetectEnabled,
   setGlobalConfig,
   setWorkspaceConfig,
   skipInitialCall,

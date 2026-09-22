@@ -488,3 +488,16 @@ test("per-repo freshness: reset clears all marks", () => {
   cfg.resetRefreshTracking();
   assert.equal(cfg.isRepoFresh("stonerl", "repo-a", 60_000), false);
 });
+
+test("auto-detect toggle: on by default, only an explicit false disables it", () => {
+  const stub = createNovaStub({});
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.equal(cfg.isAutoDetectEnabled(), true, "unset → on");
+
+  stub.globalValues["github.autoDetectRepos"] = false;
+  assert.equal(cfg.isAutoDetectEnabled(), false, "explicit false → off");
+
+  stub.globalValues["github.autoDetectRepos"] = true;
+  assert.equal(cfg.isAutoDetectEnabled(), true);
+});

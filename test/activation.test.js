@@ -220,6 +220,134 @@ test("flipping includeGlobalRepos repaints the repos section once", async () => 
   main.deactivate();
 });
 
+const UNKNOWN_REPO_GIT_CONFIG =
+  '[remote "origin"]\n\turl = https://github.com/work-org/their-repo.git';
+
+test("auto-detect off: no scan, no prompt, no detection file", async () => {
+  const stub = setup({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-a"],
+      "github.autoDetectRepos": false,
+    },
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 150));
+
+  assert.equal(
+    stub.captures.notifications.length,
+    0,
+    "detection prompt suppressed",
+  );
+  assert.ok(
+    !Object.keys(stub.files).some((k) => k.endsWith("detections.json")),
+    "detection file untouched",
+  );
+  main.deactivate();
+});
+
+test("auto-detect off: saved detections keep resolving", async () => {
+  const stub = setup({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-a"],
+      "github.autoDetectRepos": false,
+    },
+    workspaceValues: { "github.repo": "" },
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/novatest/workspace": "work-org/their-repo",
+      }),
+    },
+  });
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 150));
+
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.deepEqual(
+    cfg.getConfiguredRepos(),
+    ["their-repo", "repo-a"],
+    "saved detection still anchors the list",
+  );
+  assert.equal(
+    cfg.loadConfig().owner,
+    "work-org",
+    "saved detection still resolves the account",
+  );
+  main.deactivate();
+});
+
+test("auto-detect flipped on mid-session applies immediately", async () => {
+  const stub = setup({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-a"],
+      "github.autoDetectRepos": false,
+    },
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  // user will confirm the detection prompt raised by the flip
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 0 });
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.ok(
+    !Object.keys(stub.files).some((k) => k.endsWith("detections.json")),
+    "nothing detected while off",
+  );
+
+  // Nova commits the setting before notifying observers
+  stub.globalValues["github.autoDetectRepos"] = true;
+  stub.fireObserver("global", "github.autoDetectRepos", true);
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(
+    Object.keys(stub.files).some((k) => k.endsWith("detections.json")),
+    "detection applied after the flip",
+  );
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.deepEqual(
+    cfg.getConfiguredRepos()[0],
+    "their-repo",
+    "detected repo anchors the list after the flip",
+  );
+  main.deactivate();
+});
+
+test("auto-detect flipped off mid-session changes nothing", async () => {
+  const stub = setup({ workspaceValues: { "github.repo": "repo-b" } });
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.ok(
+    Object.keys(stub.files).some((k) => k.endsWith("detections.json")),
+    "detection applied while on (same account, silent)",
+  );
+
+  stub.fireObserver("global", "github.autoDetectRepos", false);
+  await new Promise((r) => setTimeout(r, 100));
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.deepEqual(
+    cfg.getConfiguredRepos(),
+    ["repo-a"],
+    "saved detection survives the flip-off",
+  );
+  main.deactivate();
+});
+
 test("confirmed detection refreshes the new repo and repaints views", async () => {
   const stub = createNovaStub({
     globalValues: {

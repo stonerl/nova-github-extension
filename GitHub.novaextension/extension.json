@@ -43,6 +43,13 @@
       "required": true
     },
     {
+      "key": "github.autoDetectRepos",
+      "type": "boolean",
+      "title": "Detect Repository Automatically",
+      "description": "Read the workspace's .git/config to detect its GitHub repository and offer to use it in this workspace. Saved detections keep applying while this is off; use the 'Forget Detected Repository' command to remove one.",
+      "default": true
+    },
+    {
       "key": "github.refreshInterval",
       "type": "number",
       "title": "Refresh Interval",
@@ -88,17 +95,17 @@
       "placeholder": "ghp_xxx..."
     },
     {
-      "key": "github.includeGlobalRepos",
-      "type": "boolean",
-      "title": "Include Global Repositories",
-      "description": "Also show the globally configured repositories alongside this workspace's own list. On duplicate names the workspace list wins. The auto-detected repository is always shown regardless."
-    },
-    {
       "key": "github.repos",
       "type": "stringArray",
       "title": "Repositories",
       "description": "Optional workspace override. When set, this workspace shows these repositories instead of the global list. Repository names only, without the URL.",
       "placeholder": "nova-github-extension"
+    },
+    {
+      "key": "github.includeGlobalRepos",
+      "type": "boolean",
+      "title": "Include Global Repositories",
+      "description": "Also show the globally configured repositories alongside this workspace's own list. On duplicate names the workspace list wins. The auto-detected repository is always shown regardless."
     }
   ],
 
