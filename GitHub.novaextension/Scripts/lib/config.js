@@ -223,11 +223,22 @@ function resolveOwner() {
   return nova.config.get("github.owner");
 }
 
+// Workspace override replaces the global list — the two manual scopes
+// are never mixed. The only cross-source addition is the auto-detected
+// repo: it anchors the workspace and is always shown first.
 function getConfiguredRepos() {
   const ws = nova.workspace.config.get("github.repos");
-  if (ws !== null && ws !== undefined) return ws;
-  if (detectedWorkspace) return [detectedWorkspace.repo];
-  return nova.config.get("github.repos");
+  const manual =
+    ws !== null && ws !== undefined ? ws : nova.config.get("github.repos");
+  if (detectedWorkspace) {
+    return [
+      detectedWorkspace.repo,
+      ...(Array.isArray(manual) ? manual : []).filter(
+        (r) => r !== detectedWorkspace.repo,
+      ),
+    ];
+  }
+  return manual;
 }
 
 function resolveActiveRepo() {

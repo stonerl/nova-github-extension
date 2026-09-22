@@ -128,6 +128,98 @@ test("knownOwners collects global owner + detection owners", () => {
   assert.deepEqual(cfg.knownOwners().sort(), ["org-a", "stonerl"]);
 });
 
+test("configured repos: detected repo anchors the global list", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-a", "repo-b"],
+    },
+    files: {
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/novatest/workspace": "org-x/repo-x",
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  cfg.loadDetections();
+  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x", "repo-a", "repo-b"]);
+});
+
+test("configured repos: detected repo anchors the workspace list, global excluded", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1"],
+    },
+    workspaceValues: { "github.repos": ["ws-1", "ws-2"] },
+    files: {
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/novatest/workspace": "org-x/repo-x",
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  cfg.loadDetections();
+  assert.deepEqual(
+    cfg.getConfiguredRepos(),
+    ["repo-x", "ws-1", "ws-2"],
+    "workspace override replaces global; only the detected repo joins",
+  );
+});
+
+test("configured repos: detected repo present in the manual list is deduped", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-x", "repo-b"],
+    },
+    files: {
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/novatest/workspace": "stonerl/repo-x",
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  cfg.loadDetections();
+  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x", "repo-b"]);
+});
+
+test("configured repos: empty manual list with detection still anchors", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    workspaceValues: { "github.repos": [] },
+    files: {
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/novatest/workspace": "org-x/repo-x",
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  cfg.loadDetections();
+  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x"]);
+});
+
+test("configured repos: without detection, workspace override stays strict", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1", "global-2"],
+    },
+    workspaceValues: { "github.repos": ["ws-1"] },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(
+    cfg.getConfiguredRepos(),
+    ["ws-1"],
+    "no detection → no cross-scope mixing",
+  );
+});
+
 test("isConfigReady requires token, owner, and repo", () => {
   const stub = createNovaStub({
     globalValues: { "github.owner": "stonerl" },
