@@ -261,16 +261,34 @@ function updateContextAvailability() {
   nova.workspace.context.set("github.ready", ready);
 }
 
-function getLastRefresh() {
-  return nova.config.get("github.lastRefresh") || 0;
+// Per-repo freshness tracking. Timestamps live in memory only — the
+// map starts empty on every extension start, so the first load after
+// opening a workspace always treats the active repo as stale and
+// fetches once (the old single global github.lastRefresh config key
+// masked staleness across workspaces/repos and cost one config write
+// per refresh cycle).
+const lastRefreshByRepo = new Map();
+
+function repoKey(owner, repo) {
+  return `${owner}/${repo}`;
 }
 
-function setLastRefresh(ts) {
-  try {
-    setGlobalConfig("github.lastRefresh", ts);
-  } catch (e) {
-    console.warn("[Config] Failed to record last refresh:", e);
-  }
+// True when this repo was fully fetched by this extension instance
+// within intervalMs. Unknown repos are always stale.
+function isRepoFresh(owner, repo, intervalMs) {
+  if (!owner || !repo || !(intervalMs > 0)) return false;
+  const last = lastRefreshByRepo.get(repoKey(owner, repo));
+  if (!last) return false;
+  return Date.now() - last < intervalMs;
+}
+
+function markRepoRefreshed(owner, repo) {
+  if (!owner || !repo) return;
+  lastRefreshByRepo.set(repoKey(owner, repo), Date.now());
+}
+
+function resetRefreshTracking() {
+  lastRefreshByRepo.clear();
 }
 
 module.exports = {
@@ -278,8 +296,9 @@ module.exports = {
   loadConfig,
   isConfigReady,
   updateContextAvailability,
-  getLastRefresh,
-  setLastRefresh,
+  isRepoFresh,
+  markRepoRefreshed,
+  resetRefreshTracking,
   invalidateConfigCache,
   readSetting,
   resolveOwner,

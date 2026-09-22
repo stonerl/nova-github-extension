@@ -64,6 +64,10 @@ const dataStore = {
   etags: {},
   pullDetails: {},
   _inFlight: {},
+  // Whether the most recent fetchState(state) came from the network (or
+  // a server-confirmed 304) — cache fallbacks (budget-low, rate-limit,
+  // network error) record false so freshness marking can skip them.
+  lastLive: {},
 
   // One fetch per STATE: the /issues endpoint returns issues AND pull
   // requests, and filtering happens in the providers — the issue and
@@ -80,6 +84,7 @@ const dataStore = {
         `[GitHub] Budget low (${budgetRemaining} left) — skipping auto-fetch of ${state}`,
       );
       notify.budgetLow(budgetRemaining);
+      this.lastLive[state] = false;
       const disk = loadCache(state, owner, repo);
       if (disk) {
         this.cache[state] = disk;
@@ -99,6 +104,7 @@ const dataStore = {
     const key = state;
     if (isRateLimited) {
       console.warn(`[GitHub] Skipping fetchState(${state}) due to rate-limit`);
+      this.lastLive[state] = false;
       const disk = loadCache(state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
@@ -140,14 +146,13 @@ const dataStore = {
           budgetResetAt = resetRaw ? +resetRaw * 1000 : 0;
         }
 
-        const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
-        const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
-        if (remaining === 0) {
-          applyRateLimit(
-            resetAt,
-            +resp.headers.get("retry-after") || 0,
-            "issues",
-          );
+        // 304 responses may lack x-ratelimit headers entirely — check
+        // the not-modified path BEFORE the remaining === 0 gate so a
+        // header-less 304 is never misread as an exhausted budget.
+        if (resp.status === 304) {
+          // Server confirmed the list is unchanged — the cached data is
+          // fresh even though it came from disk.
+          this.lastLive[state] = true;
           const disk = loadCache(state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
@@ -156,7 +161,15 @@ const dataStore = {
           break;
         }
 
-        if (resp.status === 304) {
+        const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
+        const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
+        if (remaining === 0) {
+          applyRateLimit(
+            resetAt,
+            +resp.headers.get("retry-after") || 0,
+            "issues",
+          );
+          this.lastLive[state] = false;
           const disk = loadCache(state, owner, repo);
           if (disk) {
             this.cache[key] = disk;
@@ -205,9 +218,11 @@ const dataStore = {
 
       this.cache[key] = allItems;
       saveCache(state, allItems, owner, repo);
+      this.lastLive[state] = true;
       return allItems;
     } catch (err) {
       console.warn(`[dataStore] fetchState(${state}) failed:`, err);
+      this.lastLive[state] = false;
       const disk = loadCache(state, owner, repo);
       if (disk) {
         this.cache[key] = disk;
@@ -359,9 +374,17 @@ async function fetchReviewComments(
   }
 }
 
+// True when the most recent fetchState(state) came from the network or
+// a server-confirmed 304 — i.e. the result is trustworthy "fresh" data.
+// Cache fallbacks (budget-low, rate-limit, network error) return false.
+function wasLiveFetch(state) {
+  return dataStore.lastLive[state] === true;
+}
+
 module.exports = {
   dataStore,
   fetchCommentsForIssue,
   fetchReviewComments,
   resetRateLimitFlag,
+  wasLiveFetch,
 };

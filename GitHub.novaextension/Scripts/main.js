@@ -5,8 +5,8 @@ const {
   loadConfig,
   isConfigReady,
   updateContextAvailability,
-  getLastRefresh,
-  setLastRefresh,
+  isRepoFresh,
+  markRepoRefreshed,
   invalidateConfigCache,
   readSetting,
   resolveOwner,
@@ -26,7 +26,11 @@ const {
   loadCache,
   pruneCaches,
 } = require("./lib/cache.js");
-const { dataStore, resetRateLimitFlag } = require("./lib/github.js");
+const {
+  dataStore,
+  resetRateLimitFlag,
+  wasLiveFetch,
+} = require("./lib/github.js");
 const { GitHubIssuesProvider } = require("./lib/tree/issues-provider.js");
 const { GitHubRepoProvider } = require("./lib/tree/repo-provider.js");
 const { parseGitConfig, decideDetection } = require("./lib/detect.js");
@@ -34,6 +38,16 @@ const notify = require("./lib/notify.js");
 
 let refreshTimer = null;
 let configSetupTimer = null;
+
+// Record per-repo freshness only when the underlying cycle actually
+// reached the network — budget-low, rate-limit, and network-error
+// fallbacks serve cached/empty data that must not count as "fresh",
+// or the auto-refresh guard would suppress retries for a full interval.
+function markRepoRefreshedIfLive(owner, repo) {
+  if (wasLiveFetch("open") && wasLiveFetch("closed")) {
+    markRepoRefreshed(owner, repo);
+  }
+}
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -121,17 +135,22 @@ exports.activate = function () {
       return;
     }
 
-    // The actual work, but guarded by lastRefresh
+    // The actual work, but guarded by per-repo freshness: only the
+    // ACTIVE repo counts, so a repo switched to (or newly detected for
+    // this workspace) refreshes even when the global cycle ran recently.
     const doRefresh = async () => {
-      const now = Date.now();
-      const last = getLastRefresh();
-      if (now - last < refreshInterval * 60 * 1000) {
+      const { token, owner, repo } = loadConfig();
+      const intervalMs = refreshInterval * 60 * 1000;
+      if (!token || !owner || !repo) {
+        console.log("[Auto-refresh] Skipped – config incomplete");
+        return;
+      }
+      if (isRepoFresh(owner, repo, intervalMs)) {
         console.log(
-          `[Auto-refresh] Skipped; only ${Math.floor((now - last) / 1000)}s since last`,
+          "[Auto-refresh] Skipped; active repo fetched within the current interval",
         );
         return;
       }
-      const { token, owner, repo } = loadConfig();
       const [openData, closedData] = await Promise.all([
         dataStore.fetchState("open", token, owner, repo),
         dataStore.fetchState("closed", token, owner, repo),
@@ -147,7 +166,7 @@ exports.activate = function () {
       const keepNumbers = [...openData, ...closedData].map((i) => i.number);
       pruneCaches(owner, repo, keepNumbers);
 
-      setLastRefresh(now);
+      markRepoRefreshedIfLive(owner, repo);
       console.log("[Auto-refresh] Views updated");
     };
 
@@ -194,6 +213,7 @@ exports.activate = function () {
           closedPRProvider
             .refreshWithData(closedData)
             .then((c) => c && closedPRView.reload());
+          markRepoRefreshedIfLive(owner, repo);
         });
       }),
     );
@@ -216,6 +236,22 @@ exports.activate = function () {
     dataProvider: closedPRProvider,
   });
   nova.subscriptions.add(openView, closedView, openPRView, closedPRView);
+
+  // scheduleRefresh-driven rebuilds (config observers, detection apply)
+  // must repaint their TreeView and record per-repo freshness — without
+  // this the detection-applied repo stayed empty until the next
+  // auto-refresh cycle.
+  const wireRebuilt = (provider, view) => {
+    provider.onRebuilt = () => {
+      const { owner, repo } = loadConfig();
+      markRepoRefreshedIfLive(owner, repo);
+      view.reload();
+    };
+  };
+  wireRebuilt(openProvider, openView);
+  wireRebuilt(closedProvider, closedView);
+  wireRebuilt(openPRProvider, openPRView);
+  wireRebuilt(closedPRProvider, closedPRView);
 
   const reposProvider = new GitHubRepoProvider();
   const reposView = new TreeView("repos", { dataProvider: reposProvider });
@@ -432,19 +468,19 @@ exports.activate = function () {
     clearOtherSelections("closed-pulls");
   });
 
-  // 3) Initial load (only if it’s been longer than a full interval)
+  // 3) Initial load. Freshness is per active repo: an in-memory map
+  // starts empty on extension start, so opening a workspace always
+  // treats the (possibly auto-detected) repo as stale and fetches once
+  // instead of serving another workspace's "fresh" timestamp.
   async function initialLoad() {
-    const now = Date.now();
     const { refreshInterval } = loadConfig();
+    const { owner, repo } = loadConfig();
 
-    if (now - getLastRefresh() < refreshInterval * 60_000) {
+    if (owner && repo && isRepoFresh(owner, repo, refreshInterval * 60_000)) {
       console.log(
-        `[Initial Load] Skipped; only ${Math.floor(
-          (now - getLastRefresh()) / 1000,
-        )}s since last — loading from cache instead`,
+        "[Initial Load] Active repo fetched recently — loading from cache instead",
       );
       // load whatever's on disk and populate the views
-      const { owner, repo } = loadConfig();
       const cachedOpen = loadCache("open", owner, repo) || [];
       const cachedClosed = loadCache("closed", owner, repo) || [];
 
@@ -465,10 +501,10 @@ exports.activate = function () {
       return;
     }
 
-    const { token, owner, repo } = loadConfig();
+    const { token, owner: netOwner, repo: netRepo } = loadConfig();
     const [openData, closedData] = await Promise.all([
-      dataStore.fetchState("open", token, owner, repo),
-      dataStore.fetchState("closed", token, owner, repo),
+      dataStore.fetchState("open", token, netOwner, netRepo),
+      dataStore.fetchState("closed", token, netOwner, netRepo),
     ]);
 
     if (await openProvider.refreshWithData(openData)) openView.reload();
@@ -478,7 +514,7 @@ exports.activate = function () {
       closedPRView.reload();
 
     // record that we just did our "initial" fetch
-    setLastRefresh(now);
+    markRepoRefreshedIfLive(netOwner, netRepo);
   }
 
   // 4) “Refresh” runs both
@@ -507,6 +543,7 @@ exports.activate = function () {
     // Full cycle succeeded — prune caches for items that vanished.
     const keepNumbers = [...openData, ...closedData].map((i) => i.number);
     pruneCaches(owner, repo, keepNumbers);
+    markRepoRefreshedIfLive(owner, repo);
   });
 
   nova.commands.register("github-issues.newIssue", () => {
@@ -721,6 +758,7 @@ async function updateIssueState(newState, reason) {
       ]);
       openView.reload();
       closedView.reload();
+      markRepoRefreshedIfLive(owner, repo);
     } else {
       const errorMessage = await resp.text();
       console.error(

@@ -24,6 +24,9 @@ class GitHubIssuesProvider {
     this.itemsById = new Map();
     this.itemMap = new WeakMap();
     this.initialized = false;
+    // Set by main.js: called after a scheduleRefresh-driven rebuild so
+    // the owning TreeView repaints and freshness gets recorded.
+    this.onRebuilt = null;
 
     // Re-fetch when config changes (global or workspace-scoped).
     // Bursts of change events (e.g. keystrokes in a settings field) are
@@ -49,10 +52,18 @@ class GitHubIssuesProvider {
    */
   scheduleRefresh() {
     if (this._pendingRefresh) clearTimeout(this._pendingRefresh);
-    this._pendingRefresh = setTimeout(() => {
+    this._pendingRefresh = setTimeout(async () => {
       this._pendingRefresh = null;
       updateContextAvailability();
-      if (isConfigReady()) this.refresh(true);
+      if (!isConfigReady()) return;
+      // Rebuilding rootItems is not enough for Nova: the TreeView only
+      // repaints on reload() (or refreshWithData) — without the hook
+      // below, config/detection-driven refreshes left the views stale
+      // until the next auto-refresh cycle.
+      const rebuilt = await this.refresh(true);
+      if (rebuilt && typeof this.onRebuilt === "function") {
+        this.onRebuilt();
+      }
     }, 500);
   }
 

@@ -191,3 +191,121 @@ test("workspace with no .git/config stays silent", async () => {
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(stub.captures.notifications.length, 0);
 });
+
+test("confirmed detection refreshes the new repo and repaints views", async () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-a"],
+      "github.refreshInterval": 30,
+      "github.maxRecentItems": "50",
+      "github.itemsPerPage": "100",
+    },
+    credentials: { stonerl: "tok", "work-org": "tok2" },
+    workspaceValues: {},
+    files: {
+      "/novatest/workspace/.git/config":
+        '[remote "origin"]\n\turl = https://github.com/work-org/their-repo.git',
+    },
+  });
+  stub.install();
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 0 });
+  stub.fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+      has: () => false,
+    },
+    json: async () => [],
+  });
+
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 1200));
+
+  assert.equal(stub.captures.notifications.length, 1, "add prompt shown");
+
+  const listFetches = stub.captures.fetchCalls.filter((f) =>
+    f.url.includes("api.github.com/repos/work-org/their-repo/issues"),
+  );
+  assert.ok(
+    listFetches.length >= 2,
+    `open+closed fetched for the detected repo (got ${listFetches.length})`,
+  );
+
+  const issueViews = stub.captures.treeViews.filter((v) =>
+    ["issues", "closed-issues", "pulls", "closed-pulls"].includes(v.id),
+  );
+  assert.equal(issueViews.length, 4);
+  for (const view of issueViews) {
+    assert.ok(
+      view.reloadCount > 0,
+      `${view.id} repainted after detection apply (reloads: ${view.reloadCount})`,
+    );
+  }
+
+  // the confirmed repo is recorded as fresh — the auto-refresh guard
+  // must not immediately refetch it
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.equal(
+    cfg.isRepoFresh("work-org", "their-repo", 30 * 60_000),
+    true,
+    "detected repo marked fresh after apply",
+  );
+});
+
+test("budget-low refresh does not mark the repo fresh", async () => {
+  const stub = setup();
+  stub.fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (h) =>
+        h === "x-ratelimit-remaining"
+          ? "50"
+          : h === "x-ratelimit-reset"
+            ? "9999999999"
+            : null,
+      has: () => false,
+    },
+    json: async () => [],
+  });
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 150));
+
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  const github = require(path.join(SCRIPTS_DIR, "lib/github.js"));
+
+  // initialLoad's first cycle ran while the budget was still unknown
+  // (null) — a real network fetch → fresh
+  assert.equal(
+    cfg.isRepoFresh("stonerl", "repo-a", 30 * 60_000),
+    true,
+    "live initial cycle marks fresh",
+  );
+
+  // simulate a later cycle under a known-low budget: clear the mark,
+  // then trigger the maxRecentItems observer (fetchState skips → cache)
+  cfg.resetRefreshTracking();
+  const githubStore = github.dataStore;
+  stub.fireObserver("global", "github.maxRecentItems", "50");
+  await new Promise((r) => setTimeout(r, 200));
+
+  assert.equal(
+    githubStore.lastLive["open"],
+    false,
+    "budget-low fetch recorded as not-live",
+  );
+  assert.equal(
+    cfg.isRepoFresh("stonerl", "repo-a", 30 * 60_000),
+    false,
+    "budget-skipped cycle must not count as fresh",
+  );
+  main.deactivate();
+});

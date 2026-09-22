@@ -198,3 +198,33 @@ test("mapPool caps concurrency and keeps order", async () => {
   assert.equal(maxConcurrent, 6, `pool caps at 6 (got ${maxConcurrent})`);
   assert.equal(p.rootItems.length, 60, "all items processed");
 });
+
+test("scheduleRefresh rebuilds after debounce and fires onRebuilt", async () => {
+  const stub = setup();
+  stub.fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+      has: () => false,
+    },
+    json: async () => [issue(1)],
+  });
+  const { GitHubIssuesProvider } = freshRequire("lib/tree/issues-provider.js");
+  const p = new GitHubIssuesProvider("open", "issue");
+
+  let rebuilt = 0;
+  p.onRebuilt = () => rebuilt++;
+
+  assert.equal(typeof p.onRebuilt, "function", "hook assignable");
+
+  p.scheduleRefresh();
+  // still inside the 500ms debounce window
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(rebuilt, 0, "no rebuild during debounce");
+  assert.equal(p.rootItems.length, 0, "no data during debounce");
+
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(rebuilt, 1, "onRebuilt fired exactly once after debounce");
+  assert.equal(p.rootItems.length, 1, "tree rebuilt from fetched data");
+});

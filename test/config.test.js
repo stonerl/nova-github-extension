@@ -180,10 +180,42 @@ test("config writes are audit-logged", () => {
   stub.install();
   stub.captureConsole();
   const cfg = freshRequire("lib/config.js");
-  cfg.setGlobalConfig("github.lastRefresh", 123);
+  cfg.setGlobalConfig("github.token", "***");
   cfg.setWorkspaceConfig("github.repo", "r");
   const audits = stub.captures.consoleLogs.filter((l) =>
     String(l.args[0]).includes("[SetAudit]"),
   );
   assert.equal(audits.length, 2);
+});
+
+test("per-repo freshness: unknown repo is stale, marking makes it fresh", () => {
+  const cfg = freshRequire("lib/config.js");
+  cfg.resetRefreshTracking();
+
+  assert.equal(cfg.isRepoFresh("stonerl", "repo-a", 30 * 60_000), false);
+  cfg.markRepoRefreshed("stonerl", "repo-a");
+  assert.equal(cfg.isRepoFresh("stonerl", "repo-a", 30 * 60_000), true);
+  // freshness is scoped per repo — another repo of the same owner is
+  // still unknown (the old global timestamp masked exactly this)
+  assert.equal(cfg.isRepoFresh("stonerl", "repo-b", 30 * 60_000), false);
+  assert.equal(cfg.isRepoFresh("other-org", "repo-a", 30 * 60_000), false);
+});
+
+test("per-repo freshness: non-positive interval and missing args are stale", () => {
+  const cfg = freshRequire("lib/config.js");
+  cfg.resetRefreshTracking();
+  cfg.markRepoRefreshed("stonerl", "repo-a");
+
+  assert.equal(cfg.isRepoFresh("stonerl", "repo-a", 0), false);
+  assert.equal(cfg.isRepoFresh("stonerl", "repo-a", -1), false);
+  assert.equal(cfg.isRepoFresh(null, "repo-a", 60_000), false);
+  assert.equal(cfg.isRepoFresh("stonerl", null, 60_000), false);
+  cfg.markRepoRefreshed(null, "repo-a"); // no-op, must not throw
+});
+
+test("per-repo freshness: reset clears all marks", () => {
+  const cfg = freshRequire("lib/config.js");
+  cfg.markRepoRefreshed("stonerl", "repo-a");
+  cfg.resetRefreshTracking();
+  assert.equal(cfg.isRepoFresh("stonerl", "repo-a", 60_000), false);
 });

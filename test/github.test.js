@@ -55,6 +55,7 @@ test("concurrent fetchState calls for the same state share one request", async (
     github.dataStore.fetchState("open", "tok", "o", "r"),
   ]);
   assert.equal(stub.captures.fetchCalls.length, 1);
+  assert.equal(github.wasLiveFetch("open"), true, "network success → live");
 });
 
 test("in-flight entry is cleaned up after settling", async () => {
@@ -87,6 +88,11 @@ test("ETag: second fetch sends If-None-Match; 304 serves disk cache", async () =
 
   const second = await github.dataStore.fetchState("open", "tok", "o", "r");
   assert.deepEqual(second, items, "304 → disk cache");
+  assert.equal(
+    github.wasLiveFetch("open"),
+    true,
+    "304 is server-confirmed fresh → live",
+  );
   const calls = stub.captures.fetchCalls;
   assert.equal(calls.length, 2);
   assert.equal(calls[1].options.headers["If-None-Match"], '"abc"');
@@ -110,6 +116,16 @@ test("rate-limit: flag held (no fetch), one log, one alert", async () => {
     stub.captures.fetchCalls.length,
     after,
     "rate-limited → no further fetches",
+  );
+  assert.equal(
+    github.wasLiveFetch("closed"),
+    false,
+    "rate-limit fallback is not live",
+  );
+  assert.equal(
+    github.wasLiveFetch("open"),
+    false,
+    "403 error fallback is not live",
   );
 
   const rateLogs = stub.captures.consoleLogs.filter((l) =>
@@ -140,6 +156,11 @@ test("budget low: auto fetch skips + serves disk cache; manual fetches", async (
   const data = await github.dataStore.fetchState("closed", "tok", "o", "r");
   assert.equal(stub.captures.fetchCalls.length, after, "auto → no network");
   assert.ok(Array.isArray(data) && data.length > 0, "disk cache served");
+  assert.equal(
+    github.wasLiveFetch("closed"),
+    false,
+    "budget-low fallback is not live",
+  );
 
   await github.dataStore.fetchState("closed", "tok", "o", "r", {
     allowBudgetSkip: false,
@@ -148,6 +169,23 @@ test("budget low: auto fetch skips + serves disk cache; manual fetches", async (
     stub.captures.fetchCalls.length,
     after + 1,
     "manual overrides gate",
+  );
+  assert.equal(github.wasLiveFetch("closed"), true, "manual fetch is live");
+});
+
+test("wasLiveFetch: never-fetched and network-error fallbacks are not live", async () => {
+  const { stub, github } = setup({ files: {} });
+
+  assert.equal(github.wasLiveFetch("open"), false, "never fetched → not live");
+
+  stub.fetchImpl = async () => {
+    throw new Error("offline");
+  };
+  await github.dataStore.fetchState("open", "tok", "o", "r");
+  assert.equal(
+    github.wasLiveFetch("open"),
+    false,
+    "network error fallback → not live",
   );
 });
 
