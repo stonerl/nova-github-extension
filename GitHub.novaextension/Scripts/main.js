@@ -187,7 +187,6 @@ exports.activate = function () {
     updateContextAvailability();
     setupAutoRefreshAndObservers();
     observeMaxRecentItems();
-    updateRepoViews(); // initial repos list (config reads — deferred)
     observeRepoListChanges();
     // Feature toggle: turning detection on mid-session runs it right
     // away; off is non-destructive — saved detections keep applying.
@@ -201,6 +200,11 @@ exports.activate = function () {
       }),
     );
     startDetection();
+    // Initial repos list AFTER detection loads: with detection memory
+    // in place, the fallback selection (no workspace github.repo set)
+    // claims the DETECTED repo instead of racing it and writing the
+    // first configured repo over the anchor.
+    updateRepoViews();
     observeTokenSetting();
     backfillAccountMappings();
     initialLoad();
@@ -837,12 +841,48 @@ exports.activate = function () {
   // Removes this workspace's detected repo (one-click; the detection
   // notification simply reappears next open if still wanted).
   nova.commands.register("github-issues.forgetDetection", () => {
+    // Capture the active repo before the forget so we can tell whether
+    // the forgotten repo was the selected one.
+    const forgotten = resolveActiveRepoPair();
     forgetDetectionForWorkspace();
     // reset a recorded decline too — forgetting should ask again
     setWorkspaceConfig("github.detectedDeclined", "");
+
+    // If the forgotten repo was the active one, drop the selection:
+    // updateRepoViews' fallback re-selects the first remaining repo;
+    // when none remain, "" resolves to nothing instead of a phantom.
+    const remaining = getConfiguredRepoPairs() || [];
+    const stillConfigured = remaining.some(
+      (p) => p.owner === forgotten?.owner && p.repo === forgotten?.repo,
+    );
+    if (forgotten && !stillConfigured) {
+      setWorkspaceConfig("github.repo", "");
+    }
+
+    // Purge the forgotten repo's data from the views immediately —
+    // without this, the stale rootItems stayed visible until the next
+    // successful refresh (and the stale selection even kept it being
+    // fetched).
+    dataStore.cache = {};
+    dataStore.etags = {};
+    dataStore.pullDetails = {};
+    for (const provider of [
+      openProvider,
+      closedProvider,
+      openPRProvider,
+      closedPRProvider,
+    ]) {
+      provider.rootItems = [];
+      provider.itemsById.clear();
+    }
+
     invalidateConfigCache();
     console.log("[RepoSelect] Detection forgotten for this workspace");
     updateRepoViews();
+    openView.reload();
+    closedView.reload();
+    openPRView.reload();
+    closedPRView.reload();
     for (const provider of [
       openProvider,
       closedProvider,

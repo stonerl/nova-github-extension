@@ -1,6 +1,7 @@
 "use strict";
 
 const test = require("node:test");
+const { afterEach } = require("node:test");
 const assert = require("node:assert");
 const { createNovaStub } = require("./helpers/nova-stub.js");
 const { freshRequire } = require("./helpers/modules.js");
@@ -10,6 +11,26 @@ const GIT_CONFIG =
 
 const UNKNOWN_REPO_GIT_CONFIG =
   '[remote "origin"]\n\turl = https://github.com/work-org/their-repo.git';
+
+// Tests that skip deactivate() leave live extension instances behind:
+// their timers fire into LATER tests and resolve the global `nova`
+// binding at call time — i.e. they read/write the CURRENT test's stub.
+// Track every activation and shut them all down between tests.
+const liveMains = new Set();
+function activateTracked() {
+  const main = freshRequire("main.js");
+  liveMains.add(main);
+  main.activate();
+  return main;
+}
+afterEach(() => {
+  for (const main of liveMains) {
+    try {
+      main.deactivate();
+    } catch {}
+  }
+  liveMains.clear();
+});
 
 function setup(stubOptions = {}) {
   const stub = createNovaStub({
@@ -37,6 +58,7 @@ function setup(stubOptions = {}) {
 test("activate performs zero config traffic synchronously", () => {
   const stub = setup();
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   main.deactivate();
   assert.equal(stub.captures.configGets.length, 0, "no config reads");
@@ -95,6 +117,7 @@ test("deferred setup registers observers, commands, and fetches", async () => {
 test("context availability is mirrored only after deferred setup", async () => {
   const stub = setup();
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   assert.equal(stub.captures.contextSets.length, 0);
   await new Promise((r) => setTimeout(r, 50));
@@ -107,6 +130,7 @@ test("context availability is mirrored only after deferred setup", async () => {
 test("deactivate is idempotent and clears timers", () => {
   const stub = setup();
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   main.deactivate();
   main.deactivate();
@@ -115,6 +139,7 @@ test("deactivate is idempotent and clears timers", () => {
 test("token observer: keystroke burst coalesces into one keychain write", async () => {
   const stub = setup();
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 50));
 
@@ -144,7 +169,7 @@ test("token observer: keystroke burst coalesces into one keychain write", async 
 test("repo detection: silent for same account, notification otherwise", async () => {
   // same account + repo in list → silent
   const stub = setup();
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(stub.captures.notifications.length, 0, "same account → silent");
   assert.equal(
@@ -173,7 +198,7 @@ test("repo detection: silent for same account, notification otherwise", async ()
   });
   stub2.install();
   stub2.captures.notificationResponses.push({ identifier: "x", actionIdx: 0 });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(
     stub2.captures.notifications.length,
@@ -194,7 +219,7 @@ test("repo detection: silent for same account, notification otherwise", async ()
 
 test("workspace with no .git/config stays silent", async () => {
   const stub = setup({ files: {} });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(stub.captures.notifications.length, 0);
 });
@@ -206,7 +231,7 @@ test("declining the prompt persists and stops future asks", async () => {
     },
   });
   stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 }); // "No"
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 250));
 
   assert.equal(
@@ -222,7 +247,7 @@ test("declining the prompt persists and stops future asks", async () => {
   assert.equal(asksBefore, 1, "asked exactly once");
 
   // workspace reopened → no ask
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(
     stub.captures.notifications.length,
@@ -238,7 +263,7 @@ test("a different remote asks again after a decline", async () => {
     },
   });
   stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 250));
   const asksBefore = stub.captures.notifications.length;
 
@@ -246,7 +271,7 @@ test("a different remote asks again after a decline", async () => {
   stub.files["/novatest/workspace/.git/config"] =
     '[remote "origin"]\n\turl = https://github.com/work-org/other-repo.git';
   stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 250));
   assert.equal(
     stub.captures.notifications.length,
@@ -267,7 +292,7 @@ test("forgetDetection resets the decline", async () => {
     },
   });
   stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 250));
   assert.equal(
     stub.workspaceValues["github.detectedDeclined"],
@@ -282,6 +307,120 @@ test("forgetDetection resets the decline", async () => {
   );
 });
 
+test("forgetDetection drops the stale selection and purges views", async () => {
+  const stub = setup({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["repo-a"],
+    },
+    credentials: { stonerl: "tok", "work-org": "tok2" },
+    workspaceValues: { "github.repo": "" },
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  // detection confirmed via the prompt
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 0 });
+  stub.fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+      has: () => false,
+    },
+    json: async () => [],
+  });
+  const main = freshRequire("main.js");
+  liveMains.add(main);
+  main.activate();
+  await new Promise((r) => setTimeout(r, 1300));
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  process.stdout.write(
+    `DBG wsSets:${JSON.stringify(stub.captures.workspaceSets)}\n` +
+      `DBG notifs:${stub.captures.notifications.length}:${stub.captures.notifications.map((n) => n.title).join("|")}\n` +
+      `DBG detections:${JSON.stringify(Object.keys(stub.files).filter((k) => k.includes("detections")))}\n` +
+      `DBG select:${JSON.stringify(stub.captures.consoleLogs.map((l) => l.args.join(" ")).filter((s) => s.includes("RepoSelect") || s.includes("[Detect]")))}\n`,
+  );
+  assert.deepEqual(
+    cfg.resolveActiveRepoPair(),
+    { owner: "work-org", repo: "their-repo" },
+    "detection anchored the selection (via detection memory)",
+  );
+
+  const before = stub.captures.fetchCalls.length;
+  await stub.captures.commands["github-issues.forgetDetection"]();
+  await new Promise((r) => setTimeout(r, 800));
+
+  assert.equal(
+    stub.workspaceValues["github.repo"],
+    "",
+    "stale selection cleared — never pointed at the user's pick",
+  );
+  const reposProvider = stub.captures.treeViews.find(
+    (v) => v.id === "repos",
+  ).dataProvider;
+  assert.deepEqual(
+    reposProvider.rootItems.map((i) => i.identifier),
+    ["stonerl/repo-a"],
+    "first remaining repo auto-selected in the sidebar (in-memory)",
+  );
+  const fetches = stub.captures.fetchCalls
+    .slice(before)
+    .filter((f) => f.url.includes("repos/work-org/"));
+  assert.equal(fetches.length, 0, "the forgotten repo is not fetched anymore");
+  const issueView = stub.captures.treeViews.find((v) => v.id === "issues");
+  assert.ok(issueView.reloadCount > 0, "issue view repainted");
+  main.deactivate();
+});
+
+test("forgetDetection keeps a repo that is also manually configured", async () => {
+  const stub = setup({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["work-org/their-repo", "repo-a"],
+    },
+    credentials: { stonerl: "tok", "work-org": "tok2" },
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 0 });
+  stub.fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+      has: () => false,
+    },
+    json: async () => [],
+  });
+  const main = freshRequire("main.js");
+  liveMains.add(main);
+  main.activate();
+  await new Promise((r) => setTimeout(r, 1300));
+
+  await stub.captures.commands["github-issues.forgetDetection"]();
+  await new Promise((r) => setTimeout(r, 300));
+
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.ok(
+    cfg
+      .getConfiguredRepoPairs()
+      .some((p) => p.owner === "work-org" && p.repo === "their-repo"),
+    "manually configured repo stays",
+  );
+  assert.deepEqual(
+    cfg.resolveActiveRepoPair(),
+    { owner: "work-org", repo: "their-repo" },
+    "selection kept when the repo is also configured manually",
+  );
+  main.deactivate();
+});
+
 test("clearing the decline setting asks again", async () => {
   const stub = setup({
     files: {
@@ -290,7 +429,7 @@ test("clearing the decline setting asks again", async () => {
     workspaceValues: { "github.detectedDeclined": "work-org/their-repo" },
   });
   stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(
     stub.captures.notifications.length,
@@ -300,7 +439,7 @@ test("clearing the decline setting asks again", async () => {
 
   // user clears the field in the workspace settings
   stub.workspaceValues["github.detectedDeclined"] = "";
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(
     stub.captures.notifications.length,
@@ -312,6 +451,7 @@ test("clearing the decline setting asks again", async () => {
 test("flipping includeGlobalRepos repaints both repo sections once", async () => {
   const stub = setup();
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
 
@@ -365,6 +505,7 @@ test("auto-detect off: no scan, no prompt, no detection file", async () => {
     },
   });
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 150));
 
@@ -396,6 +537,7 @@ test("auto-detect off: saved detections keep resolving", async () => {
     },
   });
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 150));
 
@@ -432,6 +574,7 @@ test("auto-detect flipped on mid-session applies immediately", async () => {
   // user will confirm the detection prompt raised by the flip
   stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 0 });
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
   assert.ok(
@@ -461,6 +604,7 @@ test("auto-detect flipped on mid-session applies immediately", async () => {
 test("auto-detect flipped off mid-session changes nothing", async () => {
   const stub = setup({ workspaceValues: { "github.repo": "repo-b" } });
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
   assert.ok(
@@ -509,7 +653,7 @@ test("confirmed detection refreshes the new repo and repaints views", async () =
     json: async () => [],
   });
 
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 1200));
 
   assert.equal(stub.captures.notifications.length, 1, "add prompt shown");
@@ -563,6 +707,7 @@ test("budget-low refresh does not mark the repo fresh", async () => {
   });
 
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 150));
 
@@ -618,6 +763,7 @@ test("token save probes /user and stores under the account login", async () => {
   };
 
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
 
@@ -689,6 +835,7 @@ test("workspace token save masks the workspace field, not the global one", async
   };
 
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
 
@@ -736,6 +883,7 @@ test("clearing the workspace token removes the credential and mapping", async ()
   };
 
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
 
@@ -759,7 +907,7 @@ test("clearing the workspace token removes the credential and mapping", async ()
 
 test("refresh with a resolved owner but no token names the account", async () => {
   const stub = setup({ credentials: {} });
-  freshRequire("main.js").activate();
+  activateTracked();
   await new Promise((r) => setTimeout(r, 100));
 
   await stub.captures.commands["github-issues.refresh"]();
@@ -789,6 +937,7 @@ test("token save falls back to per-owner key when /user is unreachable", async (
   };
 
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
   stub.fireObserver("global", "github.token", TEST_TOKEN);
@@ -831,6 +980,7 @@ test("backfill maps legacy per-owner tokens once, then never again", async () =>
   const { SCRIPTS_DIR } = require("./helpers/modules.js");
 
   const main = freshRequire("main.js");
+  liveMains.add(main);
   main.activate();
   await new Promise((r) => setTimeout(r, 250));
   const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
@@ -840,6 +990,7 @@ test("backfill maps legacy per-owner tokens once, then never again", async () =>
 
   // second session: mapping is persisted → zero probes
   const main2 = freshRequire("main.js");
+  liveMains.add(main2);
   main2.activate();
   await new Promise((r) => setTimeout(r, 250));
   assert.equal(userProbes, 1, "no probe after the mapping exists");

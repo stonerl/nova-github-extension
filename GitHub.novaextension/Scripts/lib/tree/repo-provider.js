@@ -72,16 +72,25 @@ class GitHubRepoProvider {
     // 3) if none is set or it's not in the list, pick the first one.
     //    With no repos configured at all, the stale persisted value
     //    is ignored — an empty section beats a phantom repo.
+    //    A fallback with NO prior selection stays in-memory only: it
+    //    must not claim github.repo before the detection flow applies
+    //    moments later — the anchor writes the canonical selection.
     if (!current || !repos.some((p) => ref(p) === ref(current))) {
+      const raw = nova.workspace.config.get("github.repo");
       if (repos.length > 0) {
         current = repos[0];
-        setWorkspaceConfig("github.repo", ref(current));
-        invalidateConfigCache();
-        console.log(
-          `[RepoSelect] No valid current repo, defaulting to "${ref(current)}"`,
-        );
+        if (raw) {
+          setWorkspaceConfig("github.repo", ref(current));
+          invalidateConfigCache();
+          console.log(
+            `[RepoSelect] Stale selection replaced with "${ref(current)}"`,
+          );
+        }
       } else {
         current = null;
+        if (raw) {
+          setWorkspaceConfig("github.repo", "");
+        }
       }
     } else {
       // The selection resolves fine, but a legacy bare spelling
