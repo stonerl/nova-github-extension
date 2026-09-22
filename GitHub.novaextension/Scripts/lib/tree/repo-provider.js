@@ -59,6 +59,11 @@ class GitHubRepoProvider {
     // 4) now build the TreeItems
     const items = [];
 
+    // 5) All other repos except the current one — the divider between
+    // current and rest only makes sense when there IS a rest; a lone
+    // repo gets no rail.
+    const remaining = repos.filter((r) => r !== currentRepo);
+
     if (currentRepo) {
       const current = new TreeItem(currentRepo, TreeItemCollapsibleState.None);
       current.identifier = currentRepo;
@@ -66,15 +71,14 @@ class GitHubRepoProvider {
       current.image = "sidebar-small";
       items.push(current);
 
-      // Add separator
-      const separator = new TreeItem("", TreeItemCollapsibleState.None);
-      separator.contextValue = "separator";
-      separator.image = "__builtin.remove";
-      items.push(separator);
+      if (remaining.length > 0) {
+        const separator = new TreeItem("", TreeItemCollapsibleState.None);
+        separator.contextValue = "separator";
+        separator.image = "__builtin.remove";
+        items.push(separator);
+      }
     }
 
-    // 5) Add all other repos except the current one
-    const remaining = repos.filter((r) => r !== currentRepo);
     for (const name of remaining) {
       const item = new TreeItem(name, TreeItemCollapsibleState.None);
       item.identifier = name;
