@@ -472,6 +472,7 @@ exports.activate = function () {
       owner: loadConfig().owner,
       repos: getConfiguredRepos() || [],
       activeRepo: resolveActiveRepo(),
+      declined: nova.workspace.config.get("github.detectedDeclined"),
     });
 
     if (decision.type === "none") return;
@@ -485,6 +486,19 @@ exports.activate = function () {
 
       try {
         const response = await nova.notifications.add(request);
+        if (response && response.actionIdx === 1) {
+          // Explicit "No" — persist so this repo stops being asked
+          // about on every workspace open. Deferred: no sync IPC
+          // inside the notification dispatch. Dismissals (clicking
+          // the notification away) are NOT recorded — they ask again.
+          await wait(100);
+          setWorkspaceConfig(
+            "github.detectedDeclined",
+            `${decision.owner}/${decision.repo}`,
+          );
+          console.log(`[RepoSelect] Declined ${label} for this workspace`);
+          return;
+        }
         if (!response || response.actionIdx !== 0) return; // dismissed
       } catch {
         return; // notification failed — manual configuration applies
@@ -796,6 +810,8 @@ exports.activate = function () {
   // notification simply reappears next open if still wanted).
   nova.commands.register("github-issues.forgetDetection", () => {
     forgetDetectionForWorkspace();
+    // reset a recorded decline too — forgetting should ask again
+    setWorkspaceConfig("github.detectedDeclined", "");
     invalidateConfigCache();
     console.log("[RepoSelect] Detection forgotten for this workspace");
     updateRepoViews();

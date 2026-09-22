@@ -64,7 +64,8 @@ function parseGitConfig(text) {
 
 /**
  * Decide what to do with a detected repo, given the current setup:
- *   - none:               nothing to do
+ *   - none:               nothing to do (incl. a previously declined
+ *                         detection for exactly this owner/repo)
  *   - setActiveRepo:      same account, repo already configured —
  *                         safe to switch the active repo silently
  *   - confirmNewAccount:  different account or unknown repo — needs
@@ -72,6 +73,10 @@ function parseGitConfig(text) {
  */
 function decideDetection(detected, current) {
   if (!detected) return { type: "none" };
+
+  if (current.declined === `${detected.owner}/${detected.repo}`) {
+    return { type: "none" }; // user said "No" to this repo before
+  }
 
   const sameOwner = detected.owner === current.owner;
   const inList = current.repos.includes(detected.repo);

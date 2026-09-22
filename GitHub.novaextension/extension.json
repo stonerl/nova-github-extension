@@ -106,6 +106,12 @@
       "type": "boolean",
       "title": "Include Global Repositories",
       "description": "Also show the globally configured repositories alongside this workspace's own list. On duplicate names the workspace list wins. The auto-detected repository is always shown regardless."
+    },
+    {
+      "key": "github.detectedDeclined",
+      "type": "string",
+      "title": "Declined Repository (auto-detection)",
+      "description": "Records the repository you declined for this workspace. Clear this field to be asked about it again — the change takes effect the next time the workspace is opened (or reloaded)."
     }
   ],
 

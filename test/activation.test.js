@@ -8,6 +8,9 @@ const { freshRequire } = require("./helpers/modules.js");
 const GIT_CONFIG =
   '[remote "origin"]\n\turl = https://github.com/stonerl/repo-a.git';
 
+const UNKNOWN_REPO_GIT_CONFIG =
+  '[remote "origin"]\n\turl = https://github.com/work-org/their-repo.git';
+
 function setup(stubOptions = {}) {
   const stub = createNovaStub({
     globalValues: {
@@ -196,6 +199,116 @@ test("workspace with no .git/config stays silent", async () => {
   assert.equal(stub.captures.notifications.length, 0);
 });
 
+test("declining the prompt persists and stops future asks", async () => {
+  const stub = setup({
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 }); // "No"
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 250));
+
+  assert.equal(
+    stub.workspaceValues["github.detectedDeclined"],
+    "work-org/their-repo",
+    "decline recorded in the workspace setting",
+  );
+  assert.ok(
+    !Object.keys(stub.files).some((k) => k.endsWith("detections.json")),
+    "decline did not apply the repo",
+  );
+  const asksBefore = stub.captures.notifications.length;
+  assert.equal(asksBefore, 1, "asked exactly once");
+
+  // workspace reopened → no ask
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(
+    stub.captures.notifications.length,
+    asksBefore,
+    "declined repo is not asked about again",
+  );
+});
+
+test("a different remote asks again after a decline", async () => {
+  const stub = setup({
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 250));
+  const asksBefore = stub.captures.notifications.length;
+
+  // remote changes to another repository
+  stub.files["/novatest/workspace/.git/config"] =
+    '[remote "origin"]\n\turl = https://github.com/work-org/other-repo.git';
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(
+    stub.captures.notifications.length,
+    asksBefore + 1,
+    "new remote → asked again",
+  );
+  assert.equal(
+    stub.workspaceValues["github.detectedDeclined"],
+    "work-org/other-repo",
+    "new decline overwrites the old one",
+  );
+});
+
+test("forgetDetection resets the decline", async () => {
+  const stub = setup({
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+  });
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(
+    stub.workspaceValues["github.detectedDeclined"],
+    "work-org/their-repo",
+  );
+
+  await stub.captures.commands["github-issues.forgetDetection"]();
+  assert.equal(
+    stub.workspaceValues["github.detectedDeclined"],
+    "",
+    "command clears the recorded decline",
+  );
+});
+
+test("clearing the decline setting asks again", async () => {
+  const stub = setup({
+    files: {
+      "/novatest/workspace/.git/config": UNKNOWN_REPO_GIT_CONFIG,
+    },
+    workspaceValues: { "github.detectedDeclined": "work-org/their-repo" },
+  });
+  stub.captures.notificationResponses.push({ identifier: "x", actionIdx: 1 });
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(
+    stub.captures.notifications.length,
+    0,
+    "pre-set decline → silent",
+  );
+
+  // user clears the field in the workspace settings
+  stub.workspaceValues["github.detectedDeclined"] = "";
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(
+    stub.captures.notifications.length,
+    1,
+    "cleared decline → asked again",
+  );
+});
+
 test("flipping includeGlobalRepos repaints the repos section once", async () => {
   const stub = setup();
   const main = freshRequire("main.js");
@@ -219,9 +332,6 @@ test("flipping includeGlobalRepos repaints the repos section once", async () => 
   assert.equal(reposView.reloadCount, before + 2);
   main.deactivate();
 });
-
-const UNKNOWN_REPO_GIT_CONFIG =
-  '[remote "origin"]\n\turl = https://github.com/work-org/their-repo.git';
 
 test("auto-detect off: no scan, no prompt, no detection file", async () => {
   const stub = setup({

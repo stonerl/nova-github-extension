@@ -101,6 +101,43 @@ test("decideDetection matrix", () => {
   });
 });
 
+test("decideDetection: a matching decline short-circuits to none", () => {
+  const detect = freshRequire("lib/detect.js");
+  const base = {
+    owner: "stonerl",
+    repos: ["repo-a"],
+    activeRepo: "repo-a",
+    declined: "work-org/their-repo",
+  };
+
+  // the declined repo — silent, regardless of account state
+  assert.deepEqual(
+    decide(detect, { owner: "work-org", repo: "their-repo" }, base),
+    { type: "none" },
+  );
+  // a different unconfirmed repo from the same account still asks
+  assert.deepEqual(
+    decide(detect, { owner: "work-org", repo: "other-repo" }, base),
+    { type: "confirmNewAccount", owner: "work-org", repo: "other-repo" },
+  );
+  // declined value for one repo doesn't suppress others
+  const declinedOther = { ...base, declined: "stonerl/repo-b" };
+  assert.deepEqual(
+    decide(detect, { owner: "work-org", repo: "their-repo" }, declinedOther),
+    { type: "confirmNewAccount", owner: "work-org", repo: "their-repo" },
+  );
+  // no decline recorded → unchanged matrix
+  const noDecline = {
+    owner: "stonerl",
+    repos: ["repo-a"],
+    activeRepo: "repo-a",
+  };
+  assert.deepEqual(
+    decide(detect, { owner: "work-org", repo: "their-repo" }, noDecline),
+    { type: "confirmNewAccount", owner: "work-org", repo: "their-repo" },
+  );
+});
+
 function decide(detect, detected, current) {
   return detect.decideDetection(detected, current);
 }
