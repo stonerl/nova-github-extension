@@ -6,6 +6,7 @@ const {
   dataStore,
   fetchCommentsForIssue,
   fetchReviewComments,
+  shouldDeferNetwork,
 } = require("../github.js");
 const {
   loadConfig,
@@ -137,6 +138,17 @@ class GitHubIssuesProvider {
     // PR hydration fetches a detail endpoint per item, and a few
     // hundred simultaneous requests can trigger rate limits and
     // flood Nova's process bridges.
+    let hydratedFromNetwork = false;
+    if (this.type === "pull") {
+      // Disk-seeded memos: a fresh process rehydrates only PRs that
+      // actually changed since the last session.
+      dataStore.seedPullDetails(owner, repo);
+      if (shouldDeferNetwork()) {
+        console.warn(
+          "[GitHub] Budget low / rate-limited — hydrating PR details from cache only",
+        );
+      }
+    }
     this.rootItems = await mapPool(issues, 6, async (i) => {
       // 6a) Hydrate PR fields *before* creating the node
       if (this.type === "pull") {
@@ -147,6 +159,11 @@ class GitHubIssuesProvider {
         if (cachedDetail && cachedDetail.updated_at === i.updated_at) {
           // PR unchanged since last hydration — reuse memoized details
           Object.assign(i, cachedDetail.data);
+        } else if (shouldDeferNetwork()) {
+          // Budget-low / rate-limited: reuse any known detail (stale)
+          // or render unhydrated — per-PR requests must not slip past
+          // the same gate the list fetches honor.
+          if (cachedDetail) Object.assign(i, cachedDetail.data);
         } else {
           const pullResp = await fetch(
             `https://api.github.com/repos/${owner}/${repo}/pulls/${i.number}`,
@@ -167,6 +184,7 @@ class GitHubIssuesProvider {
               data: detail,
             };
             Object.assign(i, detail);
+            hydratedFromNetwork = true;
           }
         }
         i.comments = originalComments;
@@ -326,6 +344,12 @@ class GitHubIssuesProvider {
 
       return parent;
     });
+
+    if (hydratedFromNetwork) {
+      // New details arrived this cycle — refresh the disk copy so the
+      // next session skips these PRs' hydration requests too.
+      dataStore.persistPullDetails(owner, repo);
+    }
 
     return true;
   }

@@ -92,6 +92,38 @@ function loadCommentCache(type, number, owner, repo) {
   }
 }
 
+// PR detail hydration cache: one file per repo, keyed by PR number,
+// each entry holding the parent item's updated_at fingerprint. Lets a
+// fresh extension process skip the one-request-per-PR hydration pass
+// for PRs that haven't changed since the last session.
+function pullDetailsPath(owner, repo) {
+  return `${repoDirFor(owner, repo)}/pull-details.json`;
+}
+
+function savePullDetails(details, owner, repo) {
+  const path = pullDetailsPath(owner, repo);
+  try {
+    const file = nova.fs.open(path, "w+t");
+    file.write(JSON.stringify(details));
+    file.close();
+  } catch (e) {
+    console.warn("[Cache] Failed to save PR details:", e);
+  }
+}
+
+function loadPullDetails(owner, repo) {
+  const path = pullDetailsPath(owner, repo);
+  try {
+    const file = nova.fs.open(path, "r");
+    const text = file.read();
+    file.close();
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 // Removes orphaned files from a repo's cache directory after a
 // successful refresh: comment caches for items no longer in any
 // fetched list, legacy per-type list caches, and sibling directories
@@ -138,12 +170,50 @@ function pruneCaches(owner, repo, keepNumbers) {
             } catch {}
           }
         }
+
+        // PR detail entries for items no longer in any fetched list
+        prunePullDetails(repoDirPath, keep);
       } catch {
         // repo dir unreadable — retry next prune
       }
     }
   } catch {
     // cache dir unreadable — nothing to prune
+  }
+}
+
+// Drops pull-detail entries whose PR number left both fetched lists.
+// Rewrites the file only when something was actually removed.
+function prunePullDetails(repoDirPath, keep) {
+  const path = `${repoDirPath}/pull-details.json`;
+  let details;
+  try {
+    const file = nova.fs.open(path, "r");
+    const text = file.read();
+    file.close();
+    details = JSON.parse(text);
+  } catch {
+    return; // no file yet, or unreadable — nothing to prune
+  }
+  if (!details || typeof details !== "object") return;
+
+  const pruned = {};
+  let removed = false;
+  for (const [number, entry] of Object.entries(details)) {
+    if (keep.has(Number(number))) {
+      pruned[number] = entry;
+    } else {
+      removed = true;
+    }
+  }
+  if (!removed) return;
+
+  try {
+    const file = nova.fs.open(path, "w+t");
+    file.write(JSON.stringify(pruned));
+    file.close();
+  } catch {
+    // retry next prune
   }
 }
 
@@ -157,5 +227,8 @@ module.exports = {
   commentCachePath,
   saveCommentCache,
   loadCommentCache,
+  pullDetailsPath,
+  savePullDetails,
+  loadPullDetails,
   pruneCaches,
 };

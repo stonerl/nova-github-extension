@@ -8,6 +8,8 @@ const {
   loadCache,
   saveCommentCache,
   loadCommentCache,
+  savePullDetails,
+  loadPullDetails,
 } = require("./cache.js");
 const notify = require("./notify.js");
 
@@ -23,6 +25,19 @@ let budgetResetAt = 0;
 
 function resetRateLimitFlag() {
   isRateLimited = false;
+}
+
+// True when list/hydration fetches should step aside: an active
+// rate-limit hold, or the shared budget is nearly exhausted. Hydration
+// (one request per PR) must honor the same gate as list fetches or a
+// budget-low cycle would still burn N per-PR requests.
+function shouldDeferNetwork() {
+  if (isRateLimited) return true;
+  return (
+    budgetRemaining !== null &&
+    budgetRemaining < BUDGET_SKIP_THRESHOLD &&
+    budgetResetAt > Date.now()
+  );
 }
 
 function applyRateLimit(resetAt, retryAfterSeconds, label) {
@@ -68,6 +83,31 @@ const dataStore = {
   // a server-confirmed 304) — cache fallbacks (budget-low, rate-limit,
   // network error) record false so freshness marking can skip them.
   lastLive: {},
+
+  // PR detail memos are per-process; the disk copy (per repo) is seeded
+  // into `pullDetails` once per repo per process so a fresh session
+  // doesn't re-fetch details for unchanged PRs.
+  _pullDetailsSeeded: {},
+
+  seedPullDetails(owner, repo) {
+    const key = `${owner}/${repo}`;
+    if (this._pullDetailsSeeded[key]) return;
+    this._pullDetailsSeeded[key] = true;
+    const disk = loadPullDetails(owner, repo);
+    if (!disk) return;
+    for (const [number, entry] of Object.entries(disk)) {
+      this.pullDetails[`${key}#${number}`] = entry;
+    }
+  },
+
+  persistPullDetails(owner, repo) {
+    const prefix = `${owner}/${repo}#`;
+    const subset = {};
+    for (const [k, v] of Object.entries(this.pullDetails)) {
+      if (k.startsWith(prefix)) subset[k.slice(prefix.length)] = v;
+    }
+    savePullDetails(subset, owner, repo);
+  },
 
   // One fetch per STATE: the /issues endpoint returns issues AND pull
   // requests, and filtering happens in the providers — the issue and
@@ -387,4 +427,5 @@ module.exports = {
   fetchReviewComments,
   resetRateLimitFlag,
   wasLiveFetch,
+  shouldDeferNetwork,
 };

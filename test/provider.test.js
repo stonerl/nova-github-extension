@@ -228,3 +228,118 @@ test("scheduleRefresh rebuilds after debounce and fires onRebuilt", async () => 
   assert.equal(rebuilt, 1, "onRebuilt fired exactly once after debounce");
   assert.equal(p.rootItems.length, 1, "tree rebuilt from fetched data");
 });
+
+const pullResponse = (extra = {}) => ({
+  ok: true,
+  status: 200,
+  headers: {
+    get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+    has: () => false,
+  },
+  json: async () => ({
+    draft: true,
+    merged_at: null,
+    head: {},
+    base: {},
+    review_comments: 0,
+    ...extra,
+  }),
+});
+
+test("PR hydration persists to disk; fresh session refetches only changed PRs", async () => {
+  const stub = setup({ files: {} });
+  let pullFetches = 0;
+  stub.fetchImpl = async (url) => {
+    if (url.includes("/pulls/")) {
+      pullFetches++;
+      return pullResponse();
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+        has: () => false,
+      },
+      json: async () => [],
+    };
+  };
+
+  const { GitHubIssuesProvider } = freshRequire("lib/tree/issues-provider.js");
+  const p = new GitHubIssuesProvider("open", "pull");
+  const prs = [issue(1, { pull_request: {} }), issue(2, { pull_request: {} })];
+  await p._refreshInternal(prs, true);
+  assert.equal(pullFetches, 2, "first session hydrates every PR");
+  assert.ok(
+    Object.keys(stub.files).some((k) => k.endsWith("pull-details.json")),
+    "details persisted to disk",
+  );
+
+  // fresh module state (as after a Nova restart), same disk
+  const { GitHubIssuesProvider: P2 } = freshRequire(
+    "lib/tree/issues-provider.js",
+  );
+  const p2 = new P2("open", "pull");
+  await p2._refreshInternal(
+    prs.map((i) => ({ ...i })),
+    true,
+  );
+  assert.equal(
+    pullFetches,
+    2,
+    "unchanged PRs rehydrated from disk, not network",
+  );
+
+  // one changed PR → exactly one detail fetch
+  const changed = [
+    issue(1, { pull_request: {}, updated_at: "2026-03-03T00:00:00Z" }),
+    { ...prs[1] },
+  ];
+  await p2._refreshInternal(changed, true);
+  assert.equal(pullFetches, 3, "changed PR refetched, survivor reused");
+});
+
+test("hydration defers to the budget gate: no per-PR fetches when budget low", async () => {
+  const stub = setup({ files: {} });
+  let pullFetches = 0;
+  stub.fetchImpl = async (url) => {
+    if (url.includes("/pulls/")) {
+      pullFetches++;
+      return pullResponse();
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h) =>
+          h === "x-ratelimit-remaining"
+            ? "50"
+            : h === "x-ratelimit-reset"
+              ? "9999999999"
+              : null,
+        has: () => false,
+      },
+      json: async () => [],
+    };
+  };
+
+  const { GitHubIssuesProvider } = freshRequire("lib/tree/issues-provider.js");
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const github = require(path.join(SCRIPTS_DIR, "lib/github.js"));
+
+  // record a low budget (manual list fetch, same gate data)
+  await github.dataStore.fetchState("open", "tok", "stonerl", "r", {
+    allowBudgetSkip: false,
+  });
+  assert.equal(github.shouldDeferNetwork(), true, "budget low → defer");
+
+  const p = new GitHubIssuesProvider("open", "pull");
+  await p._refreshInternal([issue(1, { pull_request: {} })], true);
+  assert.equal(pullFetches, 0, "no per-PR request under budget gate");
+  assert.equal(
+    p.getTreeItem(p.rootItems[0]).name,
+    "#1",
+    "rendered unhydrated (no [DRAFT] suffix)",
+  );
+});

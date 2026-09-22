@@ -52,3 +52,38 @@ test("comment cache stores etag + data + count", () => {
   assert.equal(loaded.issueUpdatedAt, "2026-01-01T00:00:00Z");
   assert.deepEqual(loaded.data, [{ id: 9 }]);
 });
+
+test("PR details: round-trip, corrupt file → null", () => {
+  const cache = setup();
+  assert.equal(cache.loadPullDetails("o", "r"), null, "missing file");
+
+  const details = {
+    5: { updated_at: "2026-01-01T00:00:00Z", data: { draft: true } },
+    7: { updated_at: "2026-01-02T00:00:00Z", data: { merged_at: null } },
+  };
+  cache.savePullDetails(details, "o", "r");
+  assert.deepEqual(cache.loadPullDetails("o", "r"), details);
+});
+
+test("pruneCaches drops PR detail entries that left both lists", () => {
+  const cache = setup();
+  cache.savePullDetails(
+    {
+      5: { updated_at: "u5", data: { draft: false } },
+      7: { updated_at: "u7", data: { draft: true } },
+    },
+    "o",
+    "r",
+  );
+
+  cache.pruneCaches("o", "r", [5, 9]); // 7 vanished
+  assert.deepEqual(
+    cache.loadPullDetails("o", "r"),
+    { 5: { updated_at: "u5", data: { draft: false } } },
+    "pruned entry gone, survivor intact",
+  );
+
+  // no-op prune must not rewrite/corrupt the file
+  cache.pruneCaches("o", "r", [5, 9]);
+  assert.deepEqual(Object.keys(cache.loadPullDetails("o", "r")), ["5"]);
+});
