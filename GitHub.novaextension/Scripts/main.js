@@ -86,7 +86,7 @@ async function flushTokenSave() {
     tokenSaveTimer = null;
   }
   if (!tokenSavePayload) return;
-  const { owner, token } = tokenSavePayload;
+  const { owner, token, scope } = tokenSavePayload;
   tokenSavePayload = null;
   try {
     let probe = null;
@@ -114,8 +114,13 @@ async function flushTokenSave() {
       }
       nova.credentials.setPassword(CREDENTIALS_SERVICE, owner, token);
     }
-    // mask the setting so it never stays in cleartext
-    setGlobalConfig("github.token", "***");
+    // mask the setting so it never stays in cleartext — only in the
+    // scope the user typed into; the other scope keeps its own mask
+    if (scope === "workspace") {
+      setWorkspaceConfig("github.token", "***");
+    } else {
+      setGlobalConfig("github.token", "***");
+    }
     invalidateConfigCache(); // cached config may hold token: null
   } catch (err) {
     console.error("[Config] Failed to save token to Keychain:", err);
@@ -495,9 +500,13 @@ exports.activate = function () {
     });
   }
 
-  // Move the token from the settings field into the Keychain
+  // Move the token from the settings field into the Keychain. Both
+  // scopes feed the same flow: the saved credential lands under the
+  // authenticated login, and only a *** mask stays in whichever field
+  // the user typed into. The payload remembers the scope for that
+  // mask write.
   function observeTokenSetting() {
-    nova.config.observe("github.token", (newValue) => {
+    const handleTokenChange = (scope) => (newValue) => {
       const owner = resolveOwner() || "default";
       if (newValue === "") {
         // cancel any pending save, then remove immediately
@@ -524,11 +533,19 @@ exports.activate = function () {
         newValue.length >= 20 && // plausible token; ignore partial edits
         newValue !== "***"
       ) {
-        tokenSavePayload = { owner, token: newValue };
+        tokenSavePayload = { owner, token: newValue, scope };
         if (tokenSaveTimer) clearTimeout(tokenSaveTimer);
         tokenSaveTimer = setTimeout(flushTokenSave, 250);
       }
-    });
+    };
+    // Registration-time fires are harmless here: an unset field fires
+    // null/"" (mask/length checks or removal of a non-existent entry),
+    // a previously saved field fires "***" (ignored) — both no-ops.
+    nova.config.observe("github.token", handleTokenChange("global"));
+    nova.workspace.config.observe(
+      "github.token",
+      handleTokenChange("workspace"),
+    );
   }
 
   function clearOtherSelections(currentKey) {
@@ -603,11 +620,23 @@ exports.activate = function () {
     markRepoRefreshedIfLive(netOwner, netRepo);
   }
 
+  // Config-incomplete surfacing that can tell WHY: owner and repo are
+  // resolved but no Keychain credential exists for that account — that
+  // deserves a different message than a blank configuration.
+  function notifyConfigIncomplete() {
+    const { owner, repo, token } = loadConfig();
+    if (owner && repo && !token) {
+      notify.missingWorkspaceToken(owner);
+    } else {
+      notify.configIncomplete();
+    }
+  }
+
   // 4) “Refresh” runs both
   nova.commands.register("github-issues.refresh", async () => {
     if (!isConfigReady()) {
       console.warn("[Command: Refresh] Skipped – config incomplete");
-      notify.configIncomplete();
+      notifyConfigIncomplete();
       return;
     }
     const { token, owner, repo } = loadConfig();

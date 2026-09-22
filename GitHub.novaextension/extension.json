@@ -76,8 +76,16 @@
       "key": "github.owner",
       "type": "string",
       "title": "GitHub Username",
-      "description": "Optional workspace override. When set, this workspace uses this account (e.g. a work organization) instead of the global GitHub Username.",
+      "description": "Optional workspace override. When set, this workspace uses this account (e.g. a work organization) instead of the global GitHub Username. Pair it with the workspace Personal Access Token below if that account is separate from the global one.",
       "placeholder": "stonerl"
+    },
+    {
+      "key": "github.token",
+      "type": "string",
+      "title": "Personal Access Token (this workspace)",
+      "description": "Optional. Token for the account this workspace uses. Stored in the Keychain under the authenticated account; this field only keeps a *** mask afterwards.",
+      "link": "https://github.com/settings/tokens/new?scopes=public_repo&description=GitHub%20for%20Nova",
+      "placeholder": "ghp_xxx..."
     },
     {
       "key": "github.repos",

@@ -350,6 +350,17 @@ test("token save probes /user and stores under the account login", async () => {
     "no per-owner entry when the probe succeeds",
   );
   assert.equal(stub.globalValues["github.token"], "***", "masked");
+  assert.ok(
+    stub.captures.configSets.some(
+      (s) => s.key === "github.token" && s.value === "***",
+    ),
+    "mask written to the global scope",
+  );
+  assert.equal(
+    stub.captures.workspaceSets.filter((s) => s.key === "github.token").length,
+    0,
+    "workspace field untouched by a global-scope save",
+  );
 
   const path = require("node:path");
   const { SCRIPTS_DIR } = require("./helpers/modules.js");
@@ -362,6 +373,126 @@ test("token save probes /user and stores under the account login", async () => {
     "loadConfig resolves the token via the login mapping",
   );
   main.deactivate();
+});
+
+test("workspace token save masks the workspace field, not the global one", async () => {
+  const stub = setup({
+    workspaceValues: {
+      "github.owner": "org-a",
+      "github.repo": "repo-a",
+      "github.token": "",
+    },
+  });
+  stub.fetchImpl = async (url) => {
+    if (url === "https://api.github.com/user") {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null, has: () => false },
+        json: async () => ({ login: "acct-ws" }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+        has: () => false,
+      },
+      json: async () => [],
+    };
+  };
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+
+  stub.fireObserver("workspace", "github.token", TEST_TOKEN);
+  await new Promise((r) => setTimeout(r, 450));
+
+  assert.equal(
+    stub.credentialsMap["acct-ws"],
+    TEST_TOKEN,
+    "workspace credential stored under its login",
+  );
+  assert.equal(
+    stub.workspaceValues["github.token"],
+    "***",
+    "workspace field masked",
+  );
+  assert.equal(
+    stub.captures.configSets.filter((s) => s.key === "github.token").length,
+    0,
+    "global field untouched by a workspace-scope save",
+  );
+  assert.ok(
+    stub.captures.workspaceSets.some(
+      (s) => s.key === "github.token" && s.value === "***",
+    ),
+    "mask written to the workspace scope",
+  );
+  main.deactivate();
+});
+
+test("clearing the workspace token removes the credential and mapping", async () => {
+  const stub = setup({
+    workspaceValues: { "github.owner": "org-a", "github.repo": "repo-a" },
+  });
+  stub.fetchImpl = async (url) => {
+    if (url === "https://api.github.com/user") {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null, has: () => false },
+        json: async () => ({ login: "acct-ws" }),
+      };
+    }
+    throw new Error("unexpected fetch: " + url);
+  };
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+
+  stub.fireObserver("workspace", "github.token", TEST_TOKEN);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(stub.credentialsMap["acct-ws"], TEST_TOKEN);
+
+  stub.fireObserver("workspace", "github.token", "");
+  assert.equal(
+    stub.credentialsMap["acct-ws"],
+    undefined,
+    "login-keyed credential removed",
+  );
+
+  const path = require("node:path");
+  const { SCRIPTS_DIR } = require("./helpers/modules.js");
+  const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
+  assert.equal(cfg.loginForOwner("org-a"), null, "mapping forgotten");
+  main.deactivate();
+});
+
+test("refresh with a resolved owner but no token names the account", async () => {
+  const stub = setup({ credentials: {} });
+  freshRequire("main.js").activate();
+  await new Promise((r) => setTimeout(r, 100));
+
+  await stub.captures.commands["github-issues.refresh"]();
+  const warnings = stub.captures.consoleLogs.filter(
+    (l) => l.level === "alert-warning",
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(
+    String(warnings[0].args[0]),
+    /No GitHub token for account "stonerl"/,
+  );
+
+  // throttled per owner
+  await stub.captures.commands["github-issues.refresh"]();
+  const warningsAfter = stub.captures.consoleLogs.filter(
+    (l) => l.level === "alert-warning",
+  );
+  assert.equal(warningsAfter.length, 1, "no repeat within the throttle");
 });
 
 test("token save falls back to per-owner key when /user is unreachable", async () => {

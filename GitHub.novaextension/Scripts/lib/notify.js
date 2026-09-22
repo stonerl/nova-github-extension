@@ -86,6 +86,18 @@ function configIncomplete() {
   );
 }
 
+// The workspace points at an account that has no Keychain credential —
+// distinguishable from generic "not configured" because the owner IS
+// resolved; only the token is missing.
+function missingWorkspaceToken(owner) {
+  showThrottled(`ws-token-${owner}`, () =>
+    showAlert(
+      nova.workspace.showWarningMessage,
+      `No GitHub token for account "${owner}" — add a Personal Access Token in this workspace's extension settings (or the global settings, while this workspace is open).`,
+    ),
+  );
+}
+
 module.exports = {
   authError,
   forbiddenError,
@@ -93,4 +105,5 @@ module.exports = {
   rateLimitError,
   budgetLow,
   configIncomplete,
+  missingWorkspaceToken,
 };
