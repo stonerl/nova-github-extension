@@ -220,6 +220,109 @@ test("configured repos: without detection, workspace override stays strict", () 
   );
 });
 
+test("configured repos: includeGlobalRepos appends global after workspace entries", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1", "global-2"],
+    },
+    workspaceValues: {
+      "github.repos": ["ws-1", "ws-2"],
+      "github.includeGlobalRepos": true,
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepos(), [
+    "ws-1",
+    "ws-2",
+    "global-1",
+    "global-2",
+  ]);
+});
+
+test("configured repos: includeGlobalRepos off keeps the override strict", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1"],
+    },
+    workspaceValues: { "github.repos": ["ws-1"] },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepos(), ["ws-1"]);
+});
+
+test("configured repos: includeGlobalRepos dedupes, workspace entry wins", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["shared", "global-1"],
+    },
+    workspaceValues: {
+      "github.repos": ["ws-1", "shared"],
+      "github.includeGlobalRepos": true,
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepos(), ["ws-1", "shared", "global-1"]);
+});
+
+test("configured repos: includeGlobalRepos without a workspace list is a no-op", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1"],
+    },
+    workspaceValues: { "github.includeGlobalRepos": true },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepos(), ["global-1"]);
+});
+
+test("configured repos: includeGlobalRepos is workspace-scoped, global value ignored", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1"],
+      "github.includeGlobalRepos": true,
+    },
+    workspaceValues: { "github.repos": ["ws-1"] },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(
+    cfg.getConfiguredRepos(),
+    ["ws-1"],
+    "a global-scope toggle value must not enable merging",
+  );
+});
+
+test("configured repos: toggle merges under the detected anchor too", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1"],
+    },
+    workspaceValues: {
+      "github.repos": ["ws-1"],
+      "github.includeGlobalRepos": true,
+    },
+    files: {
+      "/novatest/globalStorage/detections.json": JSON.stringify({
+        "/novatest/workspace": "org-x/repo-x",
+      }),
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  cfg.loadDetections();
+  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x", "ws-1", "global-1"]);
+});
+
 test("isConfigReady requires token, owner, and repo", () => {
   const stub = createNovaStub({
     globalValues: { "github.owner": "stonerl" },

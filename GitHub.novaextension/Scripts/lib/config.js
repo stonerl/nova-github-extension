@@ -224,12 +224,28 @@ function resolveOwner() {
 }
 
 // Workspace override replaces the global list — the two manual scopes
-// are never mixed. The only cross-source addition is the auto-detected
-// repo: it anchors the workspace and is always shown first.
+// are never mixed. Exception: github.includeGlobalRepos (workspace
+// only, off by default) appends the global repos after the workspace's
+// own entries; on duplicate names the workspace list wins. The other
+// cross-source addition is the auto-detected repo: it anchors the
+// workspace and is always shown first.
 function getConfiguredRepos() {
   const ws = nova.workspace.config.get("github.repos");
-  const manual =
-    ws !== null && ws !== undefined ? ws : nova.config.get("github.repos");
+  const includeGlobal =
+    nova.workspace.config.get("github.includeGlobalRepos") === true;
+  const globalList = nova.config.get("github.repos");
+
+  let manual;
+  if (ws !== null && ws !== undefined) {
+    manual = ws;
+    if (includeGlobal && Array.isArray(globalList)) {
+      const wsNames = new Set(manual);
+      manual = [...manual, ...globalList.filter((r) => !wsNames.has(r))];
+    }
+  } else {
+    manual = globalList;
+  }
+
   if (detectedWorkspace) {
     return [
       detectedWorkspace.repo,

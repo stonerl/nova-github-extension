@@ -196,6 +196,30 @@ test("workspace with no .git/config stays silent", async () => {
   assert.equal(stub.captures.notifications.length, 0);
 });
 
+test("flipping includeGlobalRepos repaints the repos section once", async () => {
+  const stub = setup();
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+
+  const reposView = stub.captures.treeViews.find((v) => v.id === "repos");
+  const before = reposView.reloadCount;
+
+  stub.fireObserver("workspace", "github.includeGlobalRepos", true);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(
+    reposView.reloadCount,
+    before + 1,
+    "toggle flip → exactly one repos-section reload",
+  );
+
+  // registration-time fire was skipped, further flips still repaint
+  stub.fireObserver("workspace", "github.includeGlobalRepos", false);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(reposView.reloadCount, before + 2);
+  main.deactivate();
+});
+
 test("confirmed detection refreshes the new repo and repaints views", async () => {
   const stub = createNovaStub({
     globalValues: {

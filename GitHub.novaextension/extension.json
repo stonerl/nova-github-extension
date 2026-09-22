@@ -88,6 +88,12 @@
       "placeholder": "ghp_xxx..."
     },
     {
+      "key": "github.includeGlobalRepos",
+      "type": "boolean",
+      "title": "Include Global Repositories",
+      "description": "Also show the globally configured repositories alongside this workspace's own list. On duplicate names the workspace list wins. The auto-detected repository is always shown regardless."
+    },
+    {
       "key": "github.repos",
       "type": "stringArray",
       "title": "Repositories",

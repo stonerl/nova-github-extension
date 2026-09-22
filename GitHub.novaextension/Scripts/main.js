@@ -418,6 +418,11 @@ exports.activate = function () {
       "github.repos",
       skipInitialCall(updateRepoViews),
     );
+    // workspace-only toggle: merging global repos changes the list
+    nova.workspace.config.observe(
+      "github.includeGlobalRepos",
+      skipInitialCall(updateRepoViews),
+    );
   }
 
   // 7) Auto-detect the workspace's GitHub repo from .git/config.
