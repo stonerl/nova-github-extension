@@ -1,6 +1,6 @@
 {
   "name": "nova-github-extension",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Test harness for the GitHub Nova extension (the extension itself has no build step)",
   "scripts": {
