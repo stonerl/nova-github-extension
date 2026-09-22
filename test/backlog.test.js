@@ -178,7 +178,7 @@ test("pruneCaches removes orphaned comment caches + legacy files + -null dirs", 
 
 // ── B7: updateIssueState simplification ──────────────────────
 
-test("updateIssueState: PATCH → cache drop → provider refetch", async () => {
+test("updateIssueState: PATCH → optimistic move, no immediate refetch", async () => {
   const stub = createNovaStub({
     globalValues: {
       "github.owner": "stonerl",
@@ -197,6 +197,14 @@ test("updateIssueState: PATCH → cache drop → provider refetch", async () => 
   let patchCalls = 0;
   let listCalls = 0;
   stub.fetchImpl = async (url, opts) => {
+    if (url.includes("api.github.com/user")) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "4999", has: () => false },
+        json: async () => ({ login: "stonerl" }),
+      };
+    }
     if (opts?.method === "PATCH") {
       patchCalls++;
       return {
@@ -239,8 +247,82 @@ test("updateIssueState: PATCH → cache drop → provider refetch", async () => 
   assert.equal(patchCalls, patchesBefore + 1, "PATCH sent");
   assert.equal(
     listCalls,
+    listsBefore,
+    "item moved optimistically — no immediate list refetch",
+  );
+
+  main.deactivate();
+});
+
+test("updateIssueState: item missing from cache → immediate refetch fallback", async () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.refreshInterval": 30,
+      "github.maxRecentItems": "50",
+      "github.itemsPerPage": "100",
+      "github.repos": ["repo-a"],
+      "github.token": "***",
+    },
+    credentials: { stonerl: "tok" },
+    workspaceValues: { "github.repo": "repo-a" },
+    files: {},
+  });
+  stub.install();
+
+  let patchCalls = 0;
+  let listCalls = 0;
+  stub.fetchImpl = async (url, opts) => {
+    if (url.includes("api.github.com/user")) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "4999", has: () => false },
+        json: async () => ({ login: "stonerl" }),
+      };
+    }
+    if (opts?.method === "PATCH") {
+      patchCalls++;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null, has: () => false },
+        json: async () => ({}),
+      };
+    }
+    listCalls++;
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
+        has: () => false,
+      },
+      json: async () => [],
+    };
+  };
+
+  const main = freshRequire("main.js");
+  main.activate();
+  await new Promise((r) => setTimeout(r, 100));
+
+  // fake selection: root issue item that is NOT in the cached lists
+  const { IssueItem } = freshRequire("lib/tree/item.js");
+  const wrapper = new IssueItem(issue(99, { state: "open" }));
+  stub.captures.treeViews
+    .find((v) => v.id === "issues")
+    .fireSelection([wrapper]);
+  await new Promise((r) => setTimeout(r, 50));
+
+  const patchesBefore = patchCalls;
+  const listsBefore = listCalls;
+  await stub.captures.commands["github-issues.closeIssue"]();
+
+  assert.equal(patchCalls, patchesBefore + 1, "PATCH sent");
+  assert.equal(
+    listCalls,
     listsBefore + 2,
-    "both states refetched (open + closed)",
+    "no optimistic move possible → both states refetched",
   );
 
   main.deactivate();

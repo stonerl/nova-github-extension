@@ -8,7 +8,6 @@ const {
   isRepoFresh,
   markRepoRefreshed,
   invalidateConfigCache,
-  readSetting,
   resolveOwner,
   getConfiguredRepoPairs,
   resolveActiveRepoPair,
@@ -44,6 +43,7 @@ const notify = require("./lib/notify.js");
 
 let refreshTimer = null;
 let configSetupTimer = null;
+let reconcileTimer = null; // delayed post-PATCH list reconciliation
 
 // Record per-repo freshness only when the underlying cycle actually
 // reached the network — budget-low, rate-limit, and network-error
@@ -52,6 +52,49 @@ let configSetupTimer = null;
 function markRepoRefreshedIfLive(owner, repo) {
   if (wasLiveFetch("open") && wasLiveFetch("closed")) {
     markRepoRefreshed(owner, repo);
+  }
+}
+
+// Optimistically moved items (close/reopen) that the server's list
+// endpoints may not reflect yet — GitHub lags behind PATCHes. Between
+// the move and the server catching up, EVERY fetched list is corrected
+// here so the item never jumps back to its old section. An entry is
+// dropped once the fetched list genuinely contains the moved item, or
+// after 120s (server truth wins; no infinite fighting).
+const pendingMoves = new Map();
+const PENDING_MOVE_TTL = 120_000;
+
+function enforcePendingMoves(owner, repo) {
+  const now = Date.now();
+  for (const [key, move] of [...pendingMoves]) {
+    if (move.owner !== owner || move.repo !== repo) continue;
+    if (now - move.at > PENDING_MOVE_TTL) {
+      pendingMoves.delete(key);
+      continue;
+    }
+    const newList = dataStore.cache[move.newState] || [];
+    const landed = newList.some(
+      (i) => i.number === move.number && !i.__pendingMove,
+    );
+    if (landed) {
+      pendingMoves.delete(key);
+      continue;
+    }
+    const fromState = move.newState === "closed" ? "open" : "closed";
+    const fromList = dataStore.cache[fromState];
+    if (fromList) {
+      const idx = fromList.findIndex((i) => i.number === move.number);
+      if (idx >= 0) fromList.splice(idx, 1);
+    }
+    move.item.state = move.newState;
+    move.item.state_reason = move.reason;
+    move.item.closed_at =
+      move.newState === "closed"
+        ? move.item.closed_at || new Date().toISOString()
+        : null;
+    move.item.__pendingMove = true;
+    (dataStore.cache[move.newState] =
+      dataStore.cache[move.newState] || []).unshift(move.item);
   }
 }
 
@@ -252,6 +295,7 @@ exports.activate = function () {
         dataStore.fetchState("open", token, owner, repo),
         dataStore.fetchState("closed", token, owner, repo),
       ]);
+      enforcePendingMoves(owner, repo);
 
       if (await openProvider.refreshWithData(openData)) openView.reload();
       if (await openPRProvider.refreshWithData(openData)) openPRView.reload();
@@ -298,6 +342,7 @@ exports.activate = function () {
           dataStore.fetchState("open", token, owner, repo),
           dataStore.fetchState("closed", token, owner, repo),
         ]).then(([openData, closedData]) => {
+          enforcePendingMoves(owner, repo);
           openProvider
             .refreshWithData(openData)
             .then((c) => c && openView.reload());
@@ -672,6 +717,7 @@ exports.activate = function () {
       dataStore.fetchState("open", token, netOwner, netRepo),
       dataStore.fetchState("closed", token, netOwner, netRepo),
     ]);
+    enforcePendingMoves(netOwner, netRepo);
 
     if (await openProvider.refreshWithData(openData)) openView.reload();
     if (await openPRProvider.refreshWithData(openData)) openPRView.reload();
@@ -711,6 +757,7 @@ exports.activate = function () {
         allowBudgetSkip: false,
       }),
     ]);
+    enforcePendingMoves(owner, repo);
 
     if (await openProvider.refreshWithData(openData)) openView.reload();
     if (await openPRProvider.refreshWithData(openData)) openPRView.reload();
@@ -920,6 +967,10 @@ exports.deactivate = function () {
     clearInterval(refreshTimer);
     refreshTimer = null;
   }
+  if (reconcileTimer) {
+    clearTimeout(reconcileTimer);
+    reconcileTimer = null;
+  }
 };
 
 async function updateIssueState(newState, reason) {
@@ -966,21 +1017,99 @@ async function updateIssueState(newState, reason) {
         `[Update] Issue #${issueNumber} set to ${newState}${reason ? ` (${reason})` : ""}`,
       );
 
-      // The server state changed — drop cached lists + ETags so the
-      // provider refreshes refetch instead of revalidating to 304s,
-      // then let each issue provider rebuild from its own request.
-      delete dataStore.cache["open"];
-      delete dataStore.cache["closed"];
-      delete dataStore.etags["open"];
-      delete dataStore.etags["closed"];
+      // GitHub's list endpoints lag behind PATCHes (eventually
+      // consistent) — an immediate refetch returns the OLD lists, so
+      // the moved item would vanish from its old section and only
+      // appear in the right one after a later cycle. Move the item
+      // optimistically in the cached lists and rebuild all four
+      // providers (issue/pull × open/closed share the per-state
+      // lists) without touching the network.
+      const fromState = newState === "closed" ? "open" : "closed";
+      const fromList = dataStore.cache[fromState] || [];
+      const idx = fromList.findIndex((i) => i.number === issueNumber);
+      let moved = null;
+      if (idx >= 0) {
+        [moved] = fromList.splice(idx, 1);
+        moved.state = newState;
+        moved.state_reason = reason;
+        moved.__pendingMove = true;
+        moved.closed_at =
+          newState === "closed"
+            ? moved.closed_at || new Date().toISOString()
+            : null;
+        dataStore.cache[newState] = dataStore.cache[newState] || [];
+        dataStore.cache[newState].unshift(moved);
+      }
 
-      await Promise.all([
-        openProvider.refresh(true),
-        closedProvider.refresh(true),
-      ]);
-      openView.reload();
-      closedView.reload();
-      markRepoRefreshedIfLive(owner, repo);
+      const reloadFromCache = () => {
+        // All four providers share the two per-state lists; rebuild
+        // each from cache and repaint. refreshWithData is async — the
+        // reloads chain off the rebuilds.
+        const pairs = [
+          [openProvider, openView],
+          [closedProvider, closedView],
+          [openPRProvider, openPRView],
+          [closedPRProvider, closedPRView],
+        ];
+        for (const [provider, view] of pairs) {
+          provider
+            .refreshWithData(dataStore.cache[provider.state] || [])
+            .then((rebuilt) => {
+              if (rebuilt) view.reload();
+            });
+        }
+      };
+
+      if (moved) {
+        pendingMoves.set(`${owner}/${repo}#${issueNumber}`, {
+          owner,
+          repo,
+          number: issueNumber,
+          newState,
+          reason,
+          item: moved,
+          at: Date.now(),
+        });
+        reloadFromCache();
+
+        // Reconcile with server truth once its lists have caught up —
+        // normalizes timestamps and ordering. If GitHub still lags,
+        // enforcePendingMoves corrects the fetched lists so the item
+        // stays put; the next auto-refresh (ETags intact → cheap)
+        // settles it for good.
+        if (reconcileTimer) clearTimeout(reconcileTimer);
+        reconcileTimer = setTimeout(async () => {
+          reconcileTimer = null;
+          delete dataStore.etags["open"];
+          delete dataStore.etags["closed"];
+          try {
+            await Promise.all([
+              dataStore.fetchState("open", token, owner, repo),
+              dataStore.fetchState("closed", token, owner, repo),
+            ]);
+          } catch (err) {
+            console.warn("[Update] Reconciliation fetch failed:", err);
+          }
+          enforcePendingMoves(owner, repo);
+          reloadFromCache();
+          markRepoRefreshedIfLive(owner, repo);
+        }, 3000);
+      } else {
+        // Item not in the in-memory cache — no optimistic move
+        // possible; fall back to the immediate refetch, then enforce
+        // any other pending moves before the views rebuild.
+        delete dataStore.cache["open"];
+        delete dataStore.cache["closed"];
+        delete dataStore.etags["open"];
+        delete dataStore.etags["closed"];
+        await Promise.all([
+          dataStore.fetchState("open", token, owner, repo),
+          dataStore.fetchState("closed", token, owner, repo),
+        ]);
+        enforcePendingMoves(owner, repo);
+        reloadFromCache();
+        markRepoRefreshedIfLive(owner, repo);
+      }
     } else {
       const errorMessage = await resp.text();
       console.error(
