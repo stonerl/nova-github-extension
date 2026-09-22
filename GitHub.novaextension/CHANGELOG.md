@@ -1,3 +1,13 @@
+## Version 0.9.3
+
+### Fixes
+
+- Closing or reopening an issue now moves it into the correct section
+  immediately: GitHub's list endpoints lag behind the state change, so
+  the previous immediate refetch put the item right back until the next
+  full cycle. The move is applied optimistically and re-asserted on
+  every fetched list until the server reflects it (at most 2 minutes).
+
 ## Version 0.9.2
 
 ### Fixes
