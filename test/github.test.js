@@ -132,6 +132,11 @@ test("rate-limit: flag held (no fetch), one log, one alert", async () => {
     String(l.args[0]).includes("rate-limited"),
   );
   assert.equal(rateLogs.length, 1, "one log per label");
+  assert.match(
+    String(rateLogs[0].args[0]),
+    /rate-limited \(HTTP 403\); pausing for at least 60s/,
+    "log includes HTTP status and hold duration",
+  );
   const alerts = stub.captures.consoleLogs.filter(
     (l) =>
       l.level === "alert-warning" && String(l.args[0]).includes("rate limit"),
@@ -189,15 +194,14 @@ test("wasLiveFetch: never-fetched and network-error fallbacks are not live", asy
   );
 });
 
-test("HTTP classification: 401 → auth alert, 403 → forbidden alert", async () => {
+test("HTTP classification: 401 → auth alert (no hold), 403 → forbidden alert", async () => {
   const { stub, github } = setup({ files: {} });
+  // Real 401s carry no x-ratelimit headers — the missing header must
+  // not be misread as an exhausted quota (remaining === 0).
   stub.fetchImpl = async () => ({
     ok: false,
     status: 401,
-    headers: {
-      get: (h) => (h === "x-ratelimit-remaining" ? "4999" : null),
-      has: () => false,
-    },
+    headers: { get: () => null, has: () => false },
     json: async () => [],
   });
   await github.dataStore.fetchState("open", "tok", "o", "r");
@@ -206,7 +210,27 @@ test("HTTP classification: 401 → auth alert, 403 → forbidden alert", async (
   );
   assert.equal(alerts.length, 1);
   assert.match(String(alerts[0].args[0]), /401/);
+  assert.equal(
+    github.shouldDeferNetwork(),
+    false,
+    "401 must not trigger the rate-limit hold",
+  );
+  assert.equal(
+    github.wasLiveFetch("open"),
+    false,
+    "error fallback is not live",
+  );
 
+  // a retry must actually attempt the network again (no rate-limit
+  // short-circuit)
+  const before = stub.captures.fetchCalls.length;
+  await github.dataStore.fetchState("open", "tok", "o", "r");
+  assert.ok(
+    stub.captures.fetchCalls.length > before,
+    "401 does not pause fetching",
+  );
+
+  // 403 with quota headers remaining > 0 → scopes problem, not a limit
   stub.fetchImpl = async () => ({
     ok: false,
     status: 403,
@@ -222,6 +246,40 @@ test("HTTP classification: 401 → auth alert, 403 → forbidden alert", async (
   );
   assert.equal(warnings.length, 1);
   assert.match(String(warnings[0].args[0]), /403/);
+  assert.equal(
+    github.shouldDeferNetwork(),
+    false,
+    "403 with remaining quota is forbidden, not rate-limited",
+  );
+});
+
+test("403/429 with exhausted quota still rate-limits (primary limit)", async () => {
+  const { stub, github } = setup({ files: {} });
+  stub.fetchImpl = async () => ({
+    ok: false,
+    status: 403,
+    headers: {
+      get: (h) =>
+        h === "x-ratelimit-remaining"
+          ? "0"
+          : h === "x-ratelimit-reset"
+            ? "9999999999"
+            : null,
+      has: () => false,
+    },
+    json: async () => [],
+  });
+  await github.dataStore.fetchState("open", "tok", "o", "r");
+  assert.equal(
+    github.shouldDeferNetwork(),
+    true,
+    "403 + remaining 0 → rate-limit hold",
+  );
+  const rateLogs = stub.captures.consoleLogs.filter((l) =>
+    String(l.args[0]).includes("rate-limited"),
+  );
+  assert.equal(rateLogs.length, 1);
+  assert.match(String(rateLogs[0].args[0]), /\(HTTP 403\)/);
 });
 
 test("fetch writes a state-named disk cache file", async () => {

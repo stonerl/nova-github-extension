@@ -40,7 +40,7 @@ function shouldDeferNetwork() {
   );
 }
 
-function applyRateLimit(resetAt, retryAfterSeconds, label) {
+function applyRateLimit(resetAt, retryAfterSeconds, label, status = null) {
   isRateLimited = true;
 
   // Log once per label per limit window — hundreds of in-flight
@@ -48,11 +48,18 @@ function applyRateLimit(resetAt, retryAfterSeconds, label) {
   // can lock up Nova's UI bridge.
   if (!rateLimitLogged.has(label)) {
     rateLimitLogged.add(label);
-    const resetDesc =
-      resetAt > 0
-        ? `resets at ${new Date(resetAt * 1000).toLocaleTimeString()}`
-        : "pausing for at least 60s";
-    console.warn(`[GitHub] ${label} rate-limited; ${resetDesc}`);
+    const statusDesc = status ? ` (HTTP ${status})` : "";
+    let resetDesc;
+    if (resetAt > 0) {
+      const minutesLeft = Math.max(
+        0,
+        Math.round((resetAt * 1000 - Date.now()) / 60_000),
+      );
+      resetDesc = `resets at ${new Date(resetAt * 1000).toLocaleTimeString()} (~${minutesLeft >= 1 ? `${minutesLeft}m` : "<1m"} from now)`;
+    } else {
+      resetDesc = "pausing for at least 60s";
+    }
+    console.warn(`[GitHub] ${label} rate-limited${statusDesc}; ${resetDesc}`);
     notify.rateLimitError();
   }
 
@@ -71,6 +78,7 @@ function applyRateLimit(resetAt, retryAfterSeconds, label) {
   setTimeout(() => {
     isRateLimited = false;
     rateLimitLogged.delete(label);
+    console.log(`[GitHub] ${label} rate limit released; resuming requests`);
   }, ms);
 }
 
@@ -203,11 +211,20 @@ const dataStore = {
 
         const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
         const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
-        if (remaining === 0) {
+        // Primary-limit responses: 403/429 with the quota exhausted, or
+        // a 200 that used the last request of the window. 401/404/etc.
+        // carry no rate-limit headers at all — treating their missing
+        // header as remaining === 0 would misread auth failures as a
+        // limit, hold all fetching for 60s, and mask the real alert.
+        const isLimitResponse =
+          remaining === 0 &&
+          (resp.ok || resp.status === 403 || resp.status === 429);
+        if (isLimitResponse) {
           applyRateLimit(
             resetAt,
             +resp.headers.get("retry-after") || 0,
             "issues",
+            resp.status,
           );
           this.lastLive[state] = false;
           const disk = loadCache(state, owner, repo);
@@ -303,11 +320,17 @@ async function fetchCommentsForIssue(
     const resp = await fetch(url, { headers });
     const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
     const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
-    if (remaining === 0) {
+    // Same guard as _fetchState: 401/404 responses lack rate-limit
+    // headers and must not be misread as an exhausted quota.
+    if (
+      remaining === 0 &&
+      (resp.ok || resp.status === 403 || resp.status === 429)
+    ) {
       applyRateLimit(
         resetAt,
         +resp.headers.get("retry-after") || 0,
         "comments",
+        resp.status,
       );
       return cache?.data || [];
     }
@@ -372,11 +395,15 @@ async function fetchReviewComments(
     const resp = await fetch(url, { headers });
     const remaining = +resp.headers.get("x-ratelimit-remaining") || 0;
     const resetAt = +resp.headers.get("x-ratelimit-reset") || 0;
-    if (remaining === 0) {
+    if (
+      remaining === 0 &&
+      (resp.ok || resp.status === 403 || resp.status === 429)
+    ) {
       applyRateLimit(
         resetAt,
         +resp.headers.get("retry-after") || 0,
         "comments",
+        resp.status,
       );
       return cache?.data || [];
     }
