@@ -347,73 +347,87 @@ exports.activate = function () {
 
   const reposProvider = new GitHubRepoProvider();
   const reposView = new TreeView("repos", { dataProvider: reposProvider });
-  nova.subscriptions.add(reposView);
+  // The Repositories section is declared in BOTH sidebars (Issues and
+  // PRs) — each needs its own TreeView instance bound to its section
+  // id; a single instance left the other sidebar's section without a
+  // provider until a restart re-bound it. One provider drives both, so
+  // the two views always render the same data.
+  const reposPullView = new TreeView("repos-pull", {
+    dataProvider: reposProvider,
+  });
+  nova.subscriptions.add(reposView, reposPullView);
 
-  reposView.onDidChangeSelection((items) => {
-    const selected = items[0];
-    // 1) ignore if they clicked nothing—or the separator visual
-    if (!selected || selected.contextValue === "separator") {
-      selectedRepoRow = null;
-      return;
-    }
-
-    // Track the picked row: context commands cannot receive the clicked
-    // TreeItem, so this is how copyUrl/openInBrowser know which repo
-    // the user right-clicked.
-    selectedRepoRow = selected.identifier || null;
-
-    const repos = getConfiguredRepos() || [];
-    let newRepo = items[0]?.identifier;
-
-    // if they didn’t actually pick one (or it’s no longer in the list),
-    // default back to the very first repo
-    if (!newRepo || !repos.includes(newRepo)) {
-      if (repos.length === 0) {
-        console.warn("[RepoSelect] No repos configured, nothing to do.");
+  const wireRepoSelection = (view) => {
+    view.onDidChangeSelection((items) => {
+      const selected = items[0];
+      // 1) ignore if they clicked nothing—or the separator visual
+      if (!selected || selected.contextValue === "separator") {
+        selectedRepoRow = null;
         return;
       }
-      newRepo = repos[0];
+
+      // Track the picked row: context commands cannot receive the
+      // clicked TreeItem, so this is how copyUrl/openInBrowser know
+      // which repo the user right-clicked. Both sidebar views share
+      // this state — selecting in one sets the current repo for both.
+      selectedRepoRow = selected.identifier || null;
+
+      const repos = getConfiguredRepos() || [];
+      let newRepo = items[0]?.identifier;
+
+      // if they didn’t actually pick one (or it’s no longer in the list),
+      // default back to the very first repo
+      if (!newRepo || !repos.includes(newRepo)) {
+        if (repos.length === 0) {
+          console.warn("[RepoSelect] No repos configured, nothing to do.");
+          return;
+        }
+        newRepo = repos[0];
+        setWorkspaceConfig("github.repo", newRepo);
+        invalidateConfigCache();
+        console.log(
+          `[RepoSelect] No valid selection → defaulting to "${newRepo}"`,
+        );
+      }
+
+      const currentRepo = nova.workspace.config.get("github.repo");
+      if (newRepo === currentRepo) {
+        console.log(`[RepoSelect] Repo "${newRepo}" is already selected.`);
+        return;
+      }
+
+      console.log(`[RepoSelect] Switching repo to "${newRepo}"`);
       setWorkspaceConfig("github.repo", newRepo);
       invalidateConfigCache();
-      console.log(
-        `[RepoSelect] No valid selection → defaulting to "${newRepo}"`,
-      );
-    }
 
-    const currentRepo = nova.workspace.config.get("github.repo");
-    if (newRepo === currentRepo) {
-      console.log(`[RepoSelect] Repo "${newRepo}" is already selected.`);
-      return;
-    }
+      // Clear selection
+      Object.keys(selectedItems).forEach((k) => (selectedItems[k] = null));
 
-    console.log(`[RepoSelect] Switching repo to "${newRepo}"`);
-    setWorkspaceConfig("github.repo", newRepo);
-    invalidateConfigCache();
+      // Reset each provider’s internal state
+      for (const provider of [
+        openProvider,
+        closedProvider,
+        openPRProvider,
+        closedPRProvider,
+      ]) {
+        provider.rootItems = [];
+        provider.itemsById.clear();
+      }
 
-    // Clear selection
-    Object.keys(selectedItems).forEach((k) => (selectedItems[k] = null));
+      // Clear cache
+      dataStore.cache = {};
+      dataStore.etags = {};
+      dataStore.pullDetails = {};
 
-    // Reset each provider’s internal state
-    for (const provider of [
-      openProvider,
-      closedProvider,
-      openPRProvider,
-      closedPRProvider,
-    ]) {
-      provider.rootItems = [];
-      provider.itemsById.clear();
-    }
-
-    // Clear cache
-    dataStore.cache = {};
-    dataStore.etags = {};
-    dataStore.pullDetails = {};
-
-    // Provider refreshes ride the workspace github.repo observers
-    // (coalesced) — no second fetch cycle needed here.
-    reposProvider.updateRepoList();
-    reposView.reload();
-  });
+      // Provider refreshes ride the workspace github.repo observers
+      // (coalesced) — no second fetch cycle needed here.
+      reposProvider.updateRepoList();
+      reposView.reload();
+      reposPullView.reload();
+    });
+  };
+  wireRepoSelection(reposView);
+  wireRepoSelection(reposPullView);
 
   const updateRepoViews = () => {
     // Deferred: this runs from config change notifications, and its
@@ -421,6 +435,7 @@ exports.activate = function () {
     setTimeout(() => {
       reposProvider.updateRepoList();
       reposView.reload(); // tell Nova to repaint the UI
+      reposPullView.reload();
     }, 0);
   };
 

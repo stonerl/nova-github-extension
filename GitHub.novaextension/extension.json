@@ -291,7 +291,7 @@
           ]
         },
         {
-          "id": "repos",
+          "id": "repos-pull",
           "name": "Repositories",
           "allowMultiple": false,
           "placeholderImage": "sidebar-large",

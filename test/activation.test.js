@@ -309,27 +309,47 @@ test("clearing the decline setting asks again", async () => {
   );
 });
 
-test("flipping includeGlobalRepos repaints the repos section once", async () => {
+test("flipping includeGlobalRepos repaints both repo sections once", async () => {
   const stub = setup();
   const main = freshRequire("main.js");
   main.activate();
   await new Promise((r) => setTimeout(r, 100));
 
+  // the Repositories section exists in BOTH sidebars, bound to two
+  // TreeView instances sharing one provider
   const reposView = stub.captures.treeViews.find((v) => v.id === "repos");
+  const reposPullView = stub.captures.treeViews.find(
+    (v) => v.id === "repos-pull",
+  );
+  assert.ok(reposView, "issues sidebar repos view created");
+  assert.ok(reposPullView, "PR sidebar repos view created");
+  assert.equal(
+    reposView.dataProvider,
+    reposPullView.dataProvider,
+    "both views driven by one provider",
+  );
+
   const before = reposView.reloadCount;
+  const beforePull = reposPullView.reloadCount;
 
   stub.fireObserver("workspace", "github.includeGlobalRepos", true);
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(
     reposView.reloadCount,
     before + 1,
-    "toggle flip → exactly one repos-section reload",
+    "toggle flip → exactly one issues-sidebar reload",
+  );
+  assert.equal(
+    reposPullView.reloadCount,
+    beforePull + 1,
+    "toggle flip → exactly one PR-sidebar reload",
   );
 
   // registration-time fire was skipped, further flips still repaint
   stub.fireObserver("workspace", "github.includeGlobalRepos", false);
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(reposView.reloadCount, before + 2);
+  assert.equal(reposPullView.reloadCount, beforePull + 2);
   main.deactivate();
 });
 
