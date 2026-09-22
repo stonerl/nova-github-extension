@@ -403,8 +403,11 @@ test("auto-detect off: saved detections keep resolving", async () => {
   const { SCRIPTS_DIR } = require("./helpers/modules.js");
   const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
   assert.deepEqual(
-    cfg.getConfiguredRepos(),
-    ["their-repo", "repo-a"],
+    cfg.getConfiguredRepoPairs(),
+    [
+      { owner: "work-org", repo: "their-repo" },
+      { owner: "stonerl", repo: "repo-a" },
+    ],
     "saved detection still anchors the list",
   );
   assert.equal(
@@ -448,8 +451,8 @@ test("auto-detect flipped on mid-session applies immediately", async () => {
   const { SCRIPTS_DIR } = require("./helpers/modules.js");
   const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
   assert.deepEqual(
-    cfg.getConfiguredRepos()[0],
-    "their-repo",
+    cfg.getConfiguredRepoPairs()[0],
+    { owner: "work-org", repo: "their-repo" },
     "detected repo anchors the list after the flip",
   );
   main.deactivate();
@@ -471,8 +474,8 @@ test("auto-detect flipped off mid-session changes nothing", async () => {
   const { SCRIPTS_DIR } = require("./helpers/modules.js");
   const cfg = require(path.join(SCRIPTS_DIR, "lib/config.js"));
   assert.deepEqual(
-    cfg.getConfiguredRepos(),
-    ["repo-a"],
+    cfg.getConfiguredRepoPairs(),
+    [{ owner: "stonerl", repo: "repo-a" }],
     "saved detection survives the flip-off",
   );
   main.deactivate();

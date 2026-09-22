@@ -77,8 +77,11 @@ test("decideDetection matrix", () => {
   const detect = freshRequire("lib/detect.js");
   const base = {
     owner: "stonerl",
-    repos: ["repo-a", "repo-b"],
-    activeRepo: "repo-a",
+    repos: [
+      { owner: "stonerl", repo: "repo-a" },
+      { owner: "stonerl", repo: "repo-b" },
+    ],
+    activeRepo: { owner: "stonerl", repo: "repo-a" },
   };
 
   assert.deepEqual(decide(detect, null, base), { type: "none" });
@@ -99,6 +102,26 @@ test("decideDetection matrix", () => {
     owner: "stonerl",
     repo: "other",
   });
+  // pair membership: a same-named repo of ANOTHER owner is not "in
+  // the list" for this account
+  assert.deepEqual(
+    decide(detect, { owner: "other-org", repo: "repo-a" }, base),
+    { type: "confirmNewAccount", owner: "other-org", repo: "repo-a" },
+  );
+});
+
+test("decideDetection: prefixed list entries count as configured", () => {
+  const detect = freshRequire("lib/detect.js");
+  const base = {
+    owner: "stonerl",
+    repos: [{ owner: "CrankBoyHQ", repo: "crankboy-app" }],
+    activeRepo: null,
+  };
+  assert.deepEqual(
+    decide(detect, { owner: "CrankBoyHQ", repo: "crankboy-app" }, base),
+    { type: "confirmNewAccount", owner: "CrankBoyHQ", repo: "crankboy-app" },
+    "in list, but a different account than the home one → still asks",
+  );
 });
 
 test("decideDetection: a matching decline short-circuits to none", () => {

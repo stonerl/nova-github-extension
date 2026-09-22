@@ -10,8 +10,9 @@ const {
   invalidateConfigCache,
   readSetting,
   resolveOwner,
-  getConfiguredRepos,
-  resolveActiveRepo,
+  getConfiguredRepoPairs,
+  resolveActiveRepoPair,
+  normalizeRepoRef,
   loadDetections,
   saveDetectionForWorkspace,
   forgetDetectionForWorkspace,
@@ -370,19 +371,22 @@ exports.activate = function () {
       // clicked TreeItem, so this is how copyUrl/openInBrowser know
       // which repo the user right-clicked. Both sidebar views share
       // this state — selecting in one sets the current repo for both.
+      // Row identifiers are canonical "owner/repo" refs.
       selectedRepoRow = selected.identifier || null;
 
-      const repos = getConfiguredRepos() || [];
+      const repoRefs = (getConfiguredRepoPairs() || []).map(
+        (p) => `${p.owner}/${p.repo}`,
+      );
       let newRepo = items[0]?.identifier;
 
       // if they didn’t actually pick one (or it’s no longer in the list),
       // default back to the very first repo
-      if (!newRepo || !repos.includes(newRepo)) {
-        if (repos.length === 0) {
+      if (!newRepo || !repoRefs.includes(newRepo)) {
+        if (repoRefs.length === 0) {
           console.warn("[RepoSelect] No repos configured, nothing to do.");
           return;
         }
-        newRepo = repos[0];
+        newRepo = repoRefs[0];
         setWorkspaceConfig("github.repo", newRepo);
         invalidateConfigCache();
         console.log(
@@ -390,8 +394,11 @@ exports.activate = function () {
         );
       }
 
-      const currentRepo = nova.workspace.config.get("github.repo");
-      if (newRepo === currentRepo) {
+      const currentRef = normalizeRepoRef(
+        nova.workspace.config.get("github.repo"),
+        resolveOwner(),
+      );
+      if (newRepo === currentRef) {
         console.log(`[RepoSelect] Repo "${newRepo}" is already selected.`);
         return;
       }
@@ -484,9 +491,9 @@ exports.activate = function () {
     }
 
     const decision = decideDetection(detected, {
-      owner: loadConfig().owner,
-      repos: getConfiguredRepos() || [],
-      activeRepo: resolveActiveRepo(),
+      owner: loadConfig().homeOwner || loadConfig().owner,
+      repos: getConfiguredRepoPairs() || [],
+      activeRepo: resolveActiveRepoPair(),
       declined: nova.workspace.config.get("github.detectedDeclined"),
     });
 
@@ -754,15 +761,19 @@ exports.activate = function () {
     }
 
     // 2) If nothing selected, open the current repo instead — or the
-    //    repo row the user last picked (right-click target)
-    const { owner } = loadConfig();
-    const repos = getConfiguredRepos() || [];
-    const repo =
-      selectedRepoRow && repos.includes(selectedRepoRow)
-        ? selectedRepoRow
-        : loadConfig().repo;
-    if (owner && repo) {
-      const repoURL = `https://github.com/${owner}/${repo}`;
+    //    repo row the user last picked (right-click target). Row refs
+    //    carry their own owner, so org repos open under the right
+    //    account even when it differs from the active one.
+    const pairForRef = (ref) =>
+      (getConfiguredRepoPairs() || []).find(
+        (p) => `${p.owner}/${p.repo}` === ref,
+      );
+    const { owner, repo } = loadConfig();
+    const target =
+      (selectedRepoRow && pairForRef(selectedRepoRow)) ||
+      (owner && repo ? { owner, repo } : null);
+    if (target) {
+      const repoURL = `https://github.com/${target.owner}/${target.repo}`;
       console.log("[Command] Opening repository URL:", repoURL);
       nova.openURL(repoURL);
     } else {
@@ -787,14 +798,16 @@ exports.activate = function () {
 
     // 2) Fallback: copy the current repository's URL — or the repo row
     //    the user last picked (right-click target)
-    const { owner } = loadConfig();
-    const repos = getConfiguredRepos() || [];
-    const repo =
-      selectedRepoRow && repos.includes(selectedRepoRow)
-        ? selectedRepoRow
-        : loadConfig().repo;
-    if (owner && repo) {
-      const repoUrl = `https://github.com/${owner}/${repo}`;
+    const pairForRef = (ref) =>
+      (getConfiguredRepoPairs() || []).find(
+        (p) => `${p.owner}/${p.repo}` === ref,
+      );
+    const { owner, repo } = loadConfig();
+    const target =
+      (selectedRepoRow && pairForRef(selectedRepoRow)) ||
+      (owner && repo ? { owner, repo } : null);
+    if (target) {
+      const repoUrl = `https://github.com/${target.owner}/${target.repo}`;
       nova.clipboard.writeText(repoUrl);
       console.log("[Command] Repository URL copied to clipboard:", repoUrl);
       return;

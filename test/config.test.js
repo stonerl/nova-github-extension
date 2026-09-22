@@ -35,13 +35,47 @@ test("detection layer sits between workspace and global", () => {
   const cfg = freshRequire("lib/config.js");
   cfg.loadDetections();
   assert.equal(cfg.resolveOwner(), "detected-org");
-  assert.deepEqual(cfg.getConfiguredRepos(), ["detected-repo"]);
-  assert.equal(cfg.resolveActiveRepo(), "detected-repo");
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "detected-org", repo: "detected-repo" },
+  ]);
+  assert.deepEqual(cfg.resolveActiveRepoPair(), {
+    owner: "detected-org",
+    repo: "detected-repo",
+  });
 
   // explicit workspace setting beats detection
   stub.workspaceValues["github.owner"] = "manual-org";
   cfg.invalidateConfigCache();
   assert.equal(cfg.resolveOwner(), "manual-org");
+});
+
+test("repo entry resolution matrix", () => {
+  const stub = createNovaStub({});
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+
+  assert.deepEqual(cfg.resolveRepoEntry("stonerl/repo-a", null), {
+    owner: "stonerl",
+    repo: "repo-a",
+  });
+  assert.deepEqual(cfg.resolveRepoEntry("repo-a", "stonerl"), {
+    owner: "stonerl",
+    repo: "repo-a",
+  });
+  assert.equal(
+    cfg.resolveRepoEntry("repo-a", null),
+    null,
+    "bare needs context",
+  );
+  assert.equal(cfg.resolveRepoEntry("", "stonerl"), null);
+  assert.equal(cfg.resolveRepoEntry("/x", "stonerl"), null);
+  assert.equal(cfg.resolveRepoEntry("stonerl/", "stonerl"), null);
+  assert.equal(cfg.resolveRepoEntry("a/b/c", "stonerl"), null);
+  assert.equal(cfg.resolveRepoEntry(null, "stonerl"), null);
+
+  assert.equal(cfg.normalizeRepoRef("repo-a", "stonerl"), "stonerl/repo-a");
+  assert.equal(cfg.normalizeRepoRef("CrankBoyHQ/app", null), "CrankBoyHQ/app");
+  assert.equal(cfg.normalizeRepoRef("garbage", null), null);
 });
 
 test("token resolves per owner from the Keychain", () => {
@@ -52,6 +86,52 @@ test("token resolves per owner from the Keychain", () => {
   stub.install();
   const cfg = freshRequire("lib/config.js");
   assert.equal(cfg.loadConfig().token, "tok-1");
+});
+
+test("owner-prefixed active repo fetches under its own owner", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    credentials: { stonerl: "home-tok", CrankBoyHQ: "org-tok" },
+    workspaceValues: { "github.repo": "CrankBoyHQ/crankboy-app" },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  const c = cfg.loadConfig();
+  assert.equal(c.owner, "CrankBoyHQ", "fetch owner follows the pair");
+  assert.equal(c.repo, "crankboy-app");
+  assert.equal(c.token, "org-tok", "org's own keychain entry wins");
+  assert.equal(c.homeOwner, "stonerl", "home account recorded separately");
+});
+
+test("org repo without its own token falls back to the home account's", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    credentials: { stonerl: "home-tok" },
+    workspaceValues: { "github.repo": "CrankBoyHQ/crankboy-app" },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  const c = cfg.loadConfig();
+  assert.equal(c.owner, "CrankBoyHQ");
+  assert.equal(
+    c.token,
+    "home-tok",
+    "the user's own PAT is used for org repos they can access",
+  );
+});
+
+test("bare active selection resolves against the workspace's account", () => {
+  const stub = createNovaStub({
+    globalValues: { "github.owner": "stonerl" },
+    credentials: { "work-org": "ws-tok" },
+    workspaceValues: { "github.owner": "work-org", "github.repo": "app" },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  const c = cfg.loadConfig();
+  assert.equal(c.owner, "work-org");
+  assert.equal(c.repo, "app");
+  assert.equal(c.token, "ws-tok");
 });
 
 test("account mapping: token resolves via the login, not the owner", () => {
@@ -143,7 +223,11 @@ test("configured repos: detected repo anchors the global list", () => {
   stub.install();
   const cfg = freshRequire("lib/config.js");
   cfg.loadDetections();
-  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x", "repo-a", "repo-b"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "org-x", repo: "repo-x" },
+    { owner: "stonerl", repo: "repo-a" },
+    { owner: "stonerl", repo: "repo-b" },
+  ]);
 });
 
 test("configured repos: detected repo anchors the workspace list, global excluded", () => {
@@ -163,9 +247,13 @@ test("configured repos: detected repo anchors the workspace list, global exclude
   const cfg = freshRequire("lib/config.js");
   cfg.loadDetections();
   assert.deepEqual(
-    cfg.getConfiguredRepos(),
-    ["repo-x", "ws-1", "ws-2"],
-    "workspace override replaces global; only the detected repo joins",
+    cfg.getConfiguredRepoPairs(),
+    [
+      { owner: "org-x", repo: "repo-x" },
+      { owner: "org-x", repo: "ws-1" },
+      { owner: "org-x", repo: "ws-2" },
+    ],
+    "workspace override replaces global; only the detected repo joins; bare ws entries belong to the detected account",
   );
 });
 
@@ -184,7 +272,25 @@ test("configured repos: detected repo present in the manual list is deduped", ()
   stub.install();
   const cfg = freshRequire("lib/config.js");
   cfg.loadDetections();
-  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x", "repo-b"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "stonerl", repo: "repo-x" },
+    { owner: "stonerl", repo: "repo-b" },
+  ]);
+});
+
+test("configured repos: same name under two owners is two repositories", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["crankboy-app", "CrankBoyHQ/crankboy-app"],
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "stonerl", repo: "crankboy-app" },
+    { owner: "CrankBoyHQ", repo: "crankboy-app" },
+  ]);
 });
 
 test("configured repos: empty manual list with detection still anchors", () => {
@@ -200,7 +306,9 @@ test("configured repos: empty manual list with detection still anchors", () => {
   stub.install();
   const cfg = freshRequire("lib/config.js");
   cfg.loadDetections();
-  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "org-x", repo: "repo-x" },
+  ]);
 });
 
 test("configured repos: without detection, workspace override stays strict", () => {
@@ -214,8 +322,8 @@ test("configured repos: without detection, workspace override stays strict", () 
   stub.install();
   const cfg = freshRequire("lib/config.js");
   assert.deepEqual(
-    cfg.getConfiguredRepos(),
-    ["ws-1"],
+    cfg.getConfiguredRepoPairs(),
+    [{ owner: "stonerl", repo: "ws-1" }],
     "no detection → no cross-scope mixing",
   );
 });
@@ -233,11 +341,11 @@ test("configured repos: includeGlobalRepos appends global after workspace entrie
   });
   stub.install();
   const cfg = freshRequire("lib/config.js");
-  assert.deepEqual(cfg.getConfiguredRepos(), [
-    "ws-1",
-    "ws-2",
-    "global-1",
-    "global-2",
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "stonerl", repo: "ws-1" },
+    { owner: "stonerl", repo: "ws-2" },
+    { owner: "stonerl", repo: "global-1" },
+    { owner: "stonerl", repo: "global-2" },
   ]);
 });
 
@@ -251,7 +359,9 @@ test("configured repos: includeGlobalRepos off keeps the override strict", () =>
   });
   stub.install();
   const cfg = freshRequire("lib/config.js");
-  assert.deepEqual(cfg.getConfiguredRepos(), ["ws-1"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "stonerl", repo: "ws-1" },
+  ]);
 });
 
 test("configured repos: includeGlobalRepos dedupes, workspace entry wins", () => {
@@ -267,7 +377,11 @@ test("configured repos: includeGlobalRepos dedupes, workspace entry wins", () =>
   });
   stub.install();
   const cfg = freshRequire("lib/config.js");
-  assert.deepEqual(cfg.getConfiguredRepos(), ["ws-1", "shared", "global-1"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "stonerl", repo: "ws-1" },
+    { owner: "stonerl", repo: "shared" },
+    { owner: "stonerl", repo: "global-1" },
+  ]);
 });
 
 test("configured repos: includeGlobalRepos without a workspace list is a no-op", () => {
@@ -280,7 +394,9 @@ test("configured repos: includeGlobalRepos without a workspace list is a no-op",
   });
   stub.install();
   const cfg = freshRequire("lib/config.js");
-  assert.deepEqual(cfg.getConfiguredRepos(), ["global-1"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "stonerl", repo: "global-1" },
+  ]);
 });
 
 test("configured repos: includeGlobalRepos is workspace-scoped, global value ignored", () => {
@@ -295,8 +411,8 @@ test("configured repos: includeGlobalRepos is workspace-scoped, global value ign
   stub.install();
   const cfg = freshRequire("lib/config.js");
   assert.deepEqual(
-    cfg.getConfiguredRepos(),
-    ["ws-1"],
+    cfg.getConfiguredRepoPairs(),
+    [{ owner: "stonerl", repo: "ws-1" }],
     "a global-scope toggle value must not enable merging",
   );
 });
@@ -320,7 +436,52 @@ test("configured repos: toggle merges under the detected anchor too", () => {
   stub.install();
   const cfg = freshRequire("lib/config.js");
   cfg.loadDetections();
-  assert.deepEqual(cfg.getConfiguredRepos(), ["repo-x", "ws-1", "global-1"]);
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "org-x", repo: "repo-x" },
+    { owner: "org-x", repo: "ws-1" },
+    { owner: "stonerl", repo: "global-1" },
+  ]);
+});
+
+test("configured repos: bare entries resolve per source, prefixed stay literal", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["mine", "CrankBoyHQ/app"],
+    },
+    workspaceValues: {
+      "github.owner": "work-org",
+      "github.repos": ["shared-name", "stonerl/mine"],
+      "github.includeGlobalRepos": true,
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "work-org", repo: "shared-name" },
+    { owner: "stonerl", repo: "mine" },
+    { owner: "CrankBoyHQ", repo: "app" },
+  ]);
+});
+
+test("configured repos: global bare entries resolve to the global owner even with a workspace override", () => {
+  const stub = createNovaStub({
+    globalValues: {
+      "github.owner": "stonerl",
+      "github.repos": ["global-1"],
+    },
+    workspaceValues: {
+      "github.owner": "work-org",
+      "github.repos": ["ws-1"],
+      "github.includeGlobalRepos": true,
+    },
+  });
+  stub.install();
+  const cfg = freshRequire("lib/config.js");
+  assert.deepEqual(cfg.getConfiguredRepoPairs(), [
+    { owner: "work-org", repo: "ws-1" },
+    { owner: "stonerl", repo: "global-1" },
+  ]);
 });
 
 test("isConfigReady requires token, owner, and repo", () => {

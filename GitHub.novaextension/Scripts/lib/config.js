@@ -185,16 +185,49 @@ function isAutoDetectEnabled() {
   return nova.config.get("github.autoDetectRepos") !== false;
 }
 
+// Repo entries may be owner-prefixed ("CrankBoyHQ/crankboy-app") or
+// bare ("crankboy-app"). A bare name belongs to the account of the
+// list it was written in: workspace-list entries resolve against the
+// workspace's owner (override, else detection, else global), global-
+// list entries against the global owner — so "global list → global
+// token" holds even when a workspace override is active.
+
+// "CrankBoyHQ/x" → {owner, repo} literal; "x" → {owner: contextOwner,
+// repo}; anything malformed → null.
+function resolveRepoEntry(entry, contextOwner) {
+  if (!entry || typeof entry !== "string") return null;
+  const slash = entry.indexOf("/");
+  if (slash < 1) {
+    if (entry.includes("/")) return null; // malformed ("", "/x", "a/")
+    if (!contextOwner) return null;
+    return { owner: contextOwner, repo: entry };
+  }
+  const owner = entry.slice(0, slash);
+  const repo = entry.slice(slash + 1);
+  if (!owner || !repo || repo.includes("/")) return null;
+  return { owner, repo };
+}
+
+// Canonical always-prefixed form — used for identifiers, comparisons,
+// and persisted selections so same-named repos of different owners
+// stay distinct everywhere.
+function normalizeRepoRef(entry, contextOwner) {
+  const pair = resolveRepoEntry(entry, contextOwner);
+  return pair ? `${pair.owner}/${pair.repo}` : null;
+}
+
 // True when this owner/repo pair is what the workspace is actually
-// configured for right now. Used to keep 404 alerts meaningful: a
-// fetch for a stale or unconfirmed repo (detection prompt still
-// pending, or a leftover workspace github.repo from another account)
-// must not surface a scary "repository not found" alert.
+// configured for right now (a configured pair, or the active repo).
+// Used to keep 404 alerts meaningful: a fetch for a stale or
+// unconfirmed repo (detection prompt still pending, or a leftover
+// workspace github.repo from another account) must not surface a
+// scary "repository not found" alert.
 function isConfiguredRepo(owner, repo) {
   if (!owner || !repo) return false;
-  if (resolveOwner() !== owner) return false;
-  const repos = getConfiguredRepos() || [];
-  return repos.includes(repo);
+  const active = resolveActiveRepoPair();
+  if (active && active.owner === owner && active.repo === repo) return true;
+  const pairs = getConfiguredRepoPairs() || [];
+  return pairs.some((p) => p.owner === owner && p.repo === repo);
 }
 
 // Removes this workspace's entry from the detection file and clears
@@ -230,44 +263,70 @@ function resolveOwner() {
   return nova.config.get("github.owner");
 }
 
-// Workspace override replaces the global list — the two manual scopes
-// are never mixed. Exception: github.includeGlobalRepos (workspace
-// only, off by default) appends the global repos after the workspace's
-// own entries; on duplicate names the workspace list wins. The other
-// cross-source addition is the auto-detected repo: it anchors the
-// workspace and is always shown first.
-function getConfiguredRepos() {
-  const ws = nova.workspace.config.get("github.repos");
+// The configured repositories as RESOLVED PAIRS. Sources:
+//   1. the auto-detected repo — always first, literal owner/repo
+//   2. the workspace list (entries resolved against the workspace's
+//      owner: override, else detection, else global) — or, absent a
+//      workspace list, the global list (entries resolved against the
+//      global owner — never mixed with the workspace scope)
+//   3. with github.includeGlobalRepos: global entries appended after
+//      the workspace's own (still resolved against the GLOBAL owner)
+// Dedupe is pair-keyed: the same repo name under two owners is two
+// repositories; the workspace list wins position on exact pair
+// collisions.
+function getConfiguredRepoPairs() {
+  const wsOwner = nova.workspace.config.get("github.owner");
+  const globalOwner = nova.config.get("github.owner");
+  const wsList = nova.workspace.config.get("github.repos");
+  const globalList = nova.config.get("github.repos");
   const includeGlobal =
     nova.workspace.config.get("github.includeGlobalRepos") === true;
-  const globalList = nova.config.get("github.repos");
 
-  let manual;
-  if (ws !== null && ws !== undefined) {
-    manual = ws;
-    if (includeGlobal && Array.isArray(globalList)) {
-      const wsNames = new Set(manual);
-      manual = [...manual, ...globalList.filter((r) => !wsNames.has(r))];
+  const pairs = [];
+  const push = (pair) => {
+    if (
+      pair &&
+      !pairs.some((p) => p.owner === pair.owner && p.repo === pair.repo)
+    ) {
+      pairs.push(pair);
     }
-  } else {
-    manual = globalList;
-  }
+  };
 
   if (detectedWorkspace) {
-    return [
-      detectedWorkspace.repo,
-      ...(Array.isArray(manual) ? manual : []).filter(
-        (r) => r !== detectedWorkspace.repo,
-      ),
-    ];
+    push({ owner: detectedWorkspace.owner, repo: detectedWorkspace.repo });
   }
-  return manual;
+
+  const wsPairs = (Array.isArray(wsList) ? wsList : []).map((entry) =>
+    resolveRepoEntry(entry, wsOwner || resolveOwner()),
+  );
+  const globalPairs = (Array.isArray(globalList) ? globalList : []).map(
+    (entry) => resolveRepoEntry(entry, globalOwner),
+  );
+
+  if (wsList !== null && wsList !== undefined) {
+    wsPairs.forEach(push);
+    if (includeGlobal) globalPairs.forEach(push);
+  } else {
+    globalPairs.forEach(push);
+  }
+
+  return pairs;
 }
 
-function resolveActiveRepo() {
-  const ws = nova.workspace.config.get("github.repo");
-  if (ws !== null && ws !== undefined) return ws;
-  if (detectedWorkspace) return detectedWorkspace.repo;
+// The ACTIVE repository as a resolved pair: the workspace's github.repo
+// selection (resolved like a workspace-list entry) or the detected
+// repo. Null when neither exists.
+function resolveActiveRepoPair() {
+  const entry = nova.workspace.config.get("github.repo");
+  if (entry !== null && entry !== undefined && entry !== "") {
+    return resolveRepoEntry(entry, resolveOwner());
+  }
+  if (detectedWorkspace) {
+    return {
+      owner: detectedWorkspace.owner,
+      repo: detectedWorkspace.repo,
+    };
+  }
   return null;
 }
 
@@ -323,9 +382,14 @@ function loadConfig() {
 
   let result;
 
-  // 1) Owner is mandatory. Precedence: explicit workspace override >
-  //    detected workspace account > global setting.
-  const owner = resolveOwner();
+  // 1) The fetch owner is the ACTIVE REPO'S OWN owner: bare selections
+  //    resolve against the workspace's account, owner-prefixed
+  //    selections ("CrankBoyHQ/app") carry their own. Token resolution
+  //    falls back to the workspace's home account so org repos work
+  //    with the user's own PAT.
+  const homeOwner = resolveOwner();
+  const activePair = resolveActiveRepoPair();
+  const owner = activePair ? activePair.owner : homeOwner;
   if (!owner) {
     logThrottled("no-owner", () =>
       console.error("[Config] github.owner must be set"),
@@ -337,14 +401,25 @@ function loadConfig() {
     //       via the /user probe) — personal login and orgs share one
     //       token, so rotations propagate everywhere at once.
     //    b) Legacy per-owner entry from earlier versions.
-    //    c) Legacy "default" entry, migrated over once.
-    const login = loginForOwner(owner);
-    let token = login
-      ? nova.credentials.getPassword(CREDENTIALS_SERVICE, login)
-      : null;
+    //    c) The home account's token (workspace or global) — covers
+    //       owner-prefixed repos of orgs the user can access.
+    //    d) Legacy "default" entry, migrated over once.
+    const tokenFor = (accountOwner) => {
+      if (!accountOwner) return null;
+      const mappedLogin = loginForOwner(accountOwner);
+      if (mappedLogin) {
+        const mapped = nova.credentials.getPassword(
+          CREDENTIALS_SERVICE,
+          mappedLogin,
+        );
+        if (mapped) return mapped;
+      }
+      return nova.credentials.getPassword(CREDENTIALS_SERVICE, accountOwner);
+    };
 
-    if (!token) {
-      token = nova.credentials.getPassword(CREDENTIALS_SERVICE, owner);
+    let token = tokenFor(owner);
+    if (!token && homeOwner && homeOwner !== owner) {
+      token = tokenFor(homeOwner);
     }
 
     // 3) If this is the first time they've set an owner,
@@ -371,7 +446,8 @@ function loadConfig() {
     result = {
       token,
       owner,
-      repo: resolveActiveRepo(),
+      homeOwner: homeOwner !== owner ? homeOwner : null,
+      repo: activePair ? activePair.repo : null,
       refreshInterval: toNumber(nova.config.get("github.refreshInterval"), 30),
       maxRecentItems: toNumber(nova.config.get("github.maxRecentItems"), 50),
       itemsPerPage: toNumber(nova.config.get("github.itemsPerPage"), 100),
@@ -441,8 +517,10 @@ module.exports = {
   invalidateConfigCache,
   readSetting,
   resolveOwner,
-  getConfiguredRepos,
-  resolveActiveRepo,
+  resolveRepoEntry,
+  normalizeRepoRef,
+  getConfiguredRepoPairs,
+  resolveActiveRepoPair,
   detectedOverride,
   loadDetections,
   saveDetectionForWorkspace,

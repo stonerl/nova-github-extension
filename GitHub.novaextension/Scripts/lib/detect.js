@@ -70,6 +70,10 @@ function parseGitConfig(text) {
  *                         safe to switch the active repo silently
  *   - confirmNewAccount:  different account or unknown repo — needs
  *                         explicit confirmation before applying
+ *
+ * `current.repos` holds resolved {owner, repo} pairs and
+ * `current.activeRepo` the active pair; bare config entries arrive
+ * pre-resolved by the caller.
  */
 function decideDetection(detected, current) {
   if (!detected) return { type: "none" };
@@ -79,10 +83,12 @@ function decideDetection(detected, current) {
   }
 
   const sameOwner = detected.owner === current.owner;
-  const inList = current.repos.includes(detected.repo);
+  const samePair = (pair) =>
+    !!pair && pair.owner === detected.owner && pair.repo === detected.repo;
+  const inList = (current.repos || []).some(samePair);
 
   if (sameOwner && inList) {
-    if (current.activeRepo === detected.repo) return { type: "none" };
+    if (samePair(current.activeRepo)) return { type: "none" };
     return {
       type: "setActiveRepo",
       owner: detected.owner,
@@ -90,7 +96,7 @@ function decideDetection(detected, current) {
     };
   }
 
-  if (sameOwner && current.activeRepo === detected.repo) {
+  if (sameOwner && samePair(current.activeRepo)) {
     return { type: "none" };
   }
 

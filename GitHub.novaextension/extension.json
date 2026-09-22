@@ -37,7 +37,7 @@
       "key": "github.repos",
       "type": "stringArray",
       "title": "Repositories",
-      "description": "One or more GitHub repository names (e.g. nova-github-extension), without the URL.",
+      "description": "One or more GitHub repository names (e.g. nova-github-extension), without the URL. Entries belong to the account set above; prefix an entry with another owner (e.g. CrankBoyHQ/crankboy-app) to include a repository of an organization or another user you can access.",
       "default": [],
       "placeholder": "nova-github-extension",
       "required": true
@@ -98,7 +98,7 @@
       "key": "github.repos",
       "type": "stringArray",
       "title": "Repositories",
-      "description": "Optional workspace override. When set, this workspace shows these repositories instead of the global list. Repository names only, without the URL.",
+      "description": "Optional workspace override. When set, this workspace shows these repositories instead of the global list. Entries belong to the account set above (the workspace GitHub Username); prefix an entry with another owner (e.g. CrankBoyHQ/crankboy-app) to include a repository of an organization or another user you can access.",
       "placeholder": "nova-github-extension"
     },
     {
